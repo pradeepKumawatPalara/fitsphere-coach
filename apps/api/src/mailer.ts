@@ -65,6 +65,42 @@ export function inviteEmail(settings: Settings, data: InviteEmailData): Outgoing
   };
 }
 
+export type ClientAddedEmailData = {
+  clientEmail: string;
+  clientName: string;
+  gymName: string;
+  /** True when the person has no FitSphere account yet: they must sign up with this email. */
+  waiting: boolean;
+};
+
+/**
+ * Tells a client the gym added them (C-D31). It never holds a password or any credentials: the coach app
+ * does not create logins. A person with no account signs up in the FitSphere app with this email and is
+ * linked to the gym automatically; a person who has one just logs in. It says nothing about the person's data.
+ */
+export function clientAddedEmail(settings: Settings, data: ClientAddedEmailData): OutgoingEmail {
+  const lines = [
+    `Hi ${data.clientName},`,
+    ``,
+    `${data.gymName} added you as a client on FitSphere.`,
+    ``,
+    data.waiting
+      ? `To join, open the FitSphere app, create an account with this email address (${data.clientEmail}) and verify it. You will be linked to ${data.gymName} automatically.`
+      : `Open the FitSphere app and log in with this email address (${data.clientEmail}). ${data.gymName} can now see what you log and set up your plans.`,
+    ``,
+    `If you do not know ${data.gymName}, ignore this email. Nothing happens until you use the app.`,
+    ``,
+    `FitSphere Coach`,
+  ];
+  return {
+    to: data.clientEmail,
+    fromName: settings.senderDisplayName,
+    fromAddress: settings.senderEmail,
+    subject: `${data.gymName} added you on FitSphere`,
+    text: lines.join('\n'),
+  };
+}
+
 export type ApprovalEmailData = {
   code: string;
   gymName: string;

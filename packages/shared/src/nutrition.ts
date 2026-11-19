@@ -18,8 +18,9 @@ export const DIET_DISCLAIMER = 'A fitness planning tool. It is not medical advic
 /** A plan more than this far (as a share) from a target gets a warning, never a block. */
 export const OFF_TARGET_WARNING = 0.1;
 
-// --- The food list: ten fixed foods for now (owner answer 2026-11-11), nutrition per 100 g. The values are
-// approximate starter values for planning; a bigger list (the FitSphere food table) comes later. ---
+// --- The food list is FitSphere's own (app.foods with app.food_portions and app.food_measures, read only,
+// nutrition per 100 g). The app searches it through GET /v1/foods. The ten starter foods below are kept
+// only so that plans saved before the food table was used keep working (their ids are not UUIDs). ---
 
 export type Nutrition = { kcal: number; proteinG: number; carbsG: number; fatG: number; fibreG: number };
 export type Food = { id: string; name: string; group: string; per100g: Nutrition; portions: { label: string; grams: number }[] };
@@ -38,7 +39,9 @@ export const FOODS: readonly Food[] = [
   { id: 'banana', name: 'Banana', group: 'Fruits', per100g: n(89, 1.1, 23, 0.3, 2.6), portions: [{ label: '1 medium', grams: 118 }] },
   { id: 'curd', name: 'Curd (dahi)', group: 'Milk products', per100g: n(61, 3.5, 4.7, 3.3, 0), portions: [{ label: '1 katori', grams: 150 }] },
 ];
-export const FOOD_IDS = FOODS.map((food) => food.id);
+export const FOOD_PAGE_SIZE = 30;
+export type FoodListResponse = { foods: Food[]; total: number };
+export type FoodGroupsResponse = { groups: { value: string; count: number }[] };
 export const foodById = (id: string): Food | undefined => FOODS.find((food) => food.id === id);
 
 const round1 = (value: number) => Math.round(value * 10) / 10;
@@ -56,7 +59,8 @@ export function nutritionFor(food: Food, grams: number): Nutrition {
 }
 
 export const ingredientInputSchema = z.strictObject({
-  foodId: z.enum(FOOD_IDS),
+  /** An app.foods id (a UUID), or the id of one of the ten starter foods of older plans. */
+  foodId: z.string().min(1).max(64).regex(/^[A-Za-z0-9-]+$/),
   /** Grams, up to one decimal. */
   grams: z.number().min(1).max(5000).multipleOf(0.1),
   /** How the coach says it, e.g. "2 pieces" (the grams are what counts). */
@@ -83,15 +87,7 @@ export const dietInputSchema = z
     note: z.string().max(300),
     slots: z.array(slotInputSchema).min(1).max(MAX_SLOTS),
   })
-  .superRefine((content, ctx) => {
-    content.slots.forEach((slot, s) =>
-      slot.options.forEach((option, o) => {
-        if (option.ingredients.filter((ingredient) => ingredient.proteinSource).length > 1) {
-          ctx.addIssue({ code: 'custom', path: ['slots', s, 'options', o, 'ingredients'], message: 'one protein source' });
-        }
-      }),
-    );
-  });
+  ;
 export type DietInput = z.output<typeof dietInputSchema>;
 
 // --- What the server stores and returns: the input plus the food's name and the nutrition of this quantity ---
@@ -124,14 +120,14 @@ export function dayTotals(content: DietContent, picks: readonly number[] = []): 
 export const deviation = (actual: number, target: number | null): number | null => (target ? (actual - target) / target : null);
 export const isOffTarget = (value: number | null): boolean => value !== null && Math.abs(value) > OFF_TARGET_WARNING;
 
-/** A plan can go live only when every slot has an option, and every option has ingredients with exactly one protein source. */
+/** A plan can go live only when every slot has an option, and every option has ingredients. */
 export function dietIsReady(content: DietContent): boolean {
   return (
     content.slots.length > 0 &&
     content.slots.every(
       (slot) =>
         slot.options.length > 0 &&
-        slot.options.every((option) => option.ingredients.length > 0 && option.ingredients.filter((ingredient) => ingredient.proteinSource).length === 1),
+        slot.options.every((option) => option.ingredients.length > 0),
     )
   );
 }
@@ -142,8 +138,7 @@ export function proteinFirst<T extends { proteinSource: boolean }>(ingredients: 
 }
 
 /**
- * Scales every quantity by `factor` (whole grams, 1 to 5000) and works the nutrition out again from the
- * food list. Used when a template is given to a client, so the plan fits their calorie target.
+ * Scales every quantity by `factor` (whole grams, 1 to 5000) and scales the stored nutrition with it. Used when a template is given to a client, so the plan fits their calorie target.
  */
 export function scaleContent(content: DietContent, factor: number): DietContent {
   return {
@@ -153,9 +148,17 @@ export function scaleContent(content: DietContent, factor: number): DietContent 
       options: slot.options.map((option) => ({
         ...option,
         ingredients: option.ingredients.map((ingredient) => {
-          const food = foodById(ingredient.foodId);
           const grams = Math.min(5000, Math.max(1, Math.round(ingredient.grams * factor)));
-          return food ? { ...ingredient, grams, ...nutritionFor(food, grams) } : ingredient;
+          const scale = ingredient.grams > 0 ? grams / ingredient.grams : 1;
+          return {
+            ...ingredient,
+            grams,
+            kcal: round1(ingredient.kcal * scale),
+            proteinG: round1(ingredient.proteinG * scale),
+            carbsG: round1(ingredient.carbsG * scale),
+            fatG: round1(ingredient.fatG * scale),
+            fibreG: round1(ingredient.fibreG * scale),
+          };
         }),
       })),
     })),
@@ -187,6 +190,8 @@ export const assignDietPlanRequestSchema = z.strictObject({
   traineeIds: z.array(idSchema).min(1).max(50),
   startDate: z.iso.date(),
   scale: z.boolean(),
+  /** The app always sends true: the new plans go live straight away (an old draft of the client is removed). */
+  publish: z.boolean().optional(),
 });
 export type AssignDietPlanRequest = z.infer<typeof assignDietPlanRequestSchema>;
 
@@ -232,7 +237,45 @@ export type DietPlanDetail = DietPlanSummary & {
   lastChange: PlanChange | null;
   /** The client's own targets, to build the plan against (null when they have none). */
   clientTargets: { calories: number | null; proteinG: number | null };
-  /** Whether Publish works now (it waits for the trainee app, TCR-004, C-D22). */
+  /** Whether the plan can be published (not once it has ended). */
   canPublish: boolean;
+  /** Whether the client's FitSphere app can show a published plan yet (it waits for TCR-004, C-D22). */
+  clientSees: boolean;
 };
 export type DietPlanListResponse = { plans: DietPlanSummary[]; coaches: { id: string; name: string | null }[] };
+
+// --- A client's logged food, read from the FitSphere app (GET /v1/clients/{id}/nutrition) ---
+
+export type NutritionItem = {
+  name: string;
+  amount: { value: number; unit: string } | null;
+  kcal: number | null;
+  proteinG: number | null;
+  carbsG: number | null;
+  fatG: number | null;
+  /** The client estimated the values instead of reading a label. */
+  estimated: boolean;
+};
+export type NutritionMeal = {
+  id: string;
+  /** breakfast, lunch, dinner, snack ... as the FitSphere app names it. */
+  mealType: string;
+  recordedAt: string;
+  kcal: number | null;
+  proteinG: number | null;
+  carbsG: number | null;
+  fatG: number | null;
+  fibreG: number | null;
+  items: NutritionItem[];
+  /** A public link, or a stored file that this app cannot show yet (it needs a link only the trainee API can issue). */
+  photo: { kind: 'link'; url: string } | { kind: 'stored' } | null;
+};
+export type NutritionTotals = { kcal: number; proteinG: number; carbsG: number; fatG: number; fibreG: number };
+export type ClientNutritionResponse = {
+  day: string;
+  totals: NutritionTotals;
+  targets: { kcal: number | null; proteinG: number | null; carbsG: number | null; fatG: number | null; fibreG: number | null };
+  meals: NutritionMeal[];
+  /** The 7 days up to and including `day` that have meals, newest first. */
+  week: { day: string; kcal: number | null; meals: number }[];
+};

@@ -30,7 +30,9 @@ the owner reviews it, and the owner gives it to Developer 1, who builds it in th
 | TCR-002 | Coach-set targets override the trainee's own (C-D27): shown with "Set by <name> (HC)" or "(C)", locked for the trainee; stay read-only after the link ends | CF05 | Not written yet |
 | TCR-003 | Coach training plan in the Training tab; workouts logged against it | CF06 | **Ready for owner** (`TCR-003-training-plans.md`, 2026-11-11; CF06 answers are in; open questions in §12) |
 | TCR-004 | Coach diet plan in the Diet plan tab; a plan option logged as a meal | CF07 | **Ready for owner** (`TCR-004-diet-plans.md`, 2026-11-11; four open questions in §12) |
-| TCR-005 | Separate database login for the coach server (its `app` permissions), ADR-0002 | Before the first real user | Not written yet |
+| TCR-005 | The coach's schedule in the trainee app: `app.schedule_items` (workouts and diet plans on dates); the client's own log marks a workout done | CF09 | **Draft** (`TCR-005-calendar.md`, 2026-11-11) |
+| TCR-006 | Separate database login for the coach server (its `app` permissions), ADR-0002 | Before the first real user | Not written yet (was numbered TCR-005 before the calendar request) |
+| TCR-007 | `app.users.is_gym_member` and `app.users.open_to_gym` (opt-in "open to joining a gym" switch); the coach app lists only opted-in users when a gym owner adds a client | CF04 | **Draft** (`TCR-007-gym-member-and-open-to-gym.md`, 2026-11-12) |
 
 ## Template
 

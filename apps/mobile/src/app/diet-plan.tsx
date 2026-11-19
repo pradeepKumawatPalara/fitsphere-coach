@@ -1,6 +1,7 @@
 // A client's diet plan (CF07, docs/design/CF07-nutrition-management-ui.md §2.7): the status first, then
 // the client's targets against the plan, then the slots. Publish, end and discard are sheets. Publish
 // waits for the FitSphere app update (TCR-004): while the server says it cannot publish, it is hidden.
+import { useFocusTick } from '../focus';
 import { dayTotals, DIET_DISCLAIMER, optionTotals, type DietPlanDetail } from '@fitsphere-coach/shared';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -21,6 +22,7 @@ export default function DietPlan() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { deps } = useAuth();
   const router = useRouter();
+  const focused = useFocusTick();
   const { colors } = useTheme();
   const [plan, setPlan] = useState<DietPlanDetail | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -47,7 +49,7 @@ export default function DietPlan() {
     return () => {
       current = false;
     };
-  }, [deps, id, router, tick]);
+  }, [deps, id, router, tick, focused]);
 
   async function run(action: () => Promise<{ kind: 'ok' } | { kind: Failure }>, after: 'reload' | 'list') {
     setWorking(true);
@@ -99,7 +101,7 @@ export default function DietPlan() {
             {plan.status === 'active' && !unpublished ? <Banner kind="success">{DIET_TEXTS.liveBanner(name)}</Banner> : null}
             {plan.status === 'ended' ? <Banner kind="info">{DIET_TEXTS.endedBanner}</Banner> : null}
           </View>
-          {!plan.canPublish && plan.status !== 'ended' ? (
+          {!plan.clientSees && plan.status !== 'ended' ? (
             <View style={{ marginTop: 8 }}>
               <Banner kind="info">{DIET_TEXTS.publishWaits}</Banner>
             </View>

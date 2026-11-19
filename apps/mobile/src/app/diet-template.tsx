@@ -12,7 +12,7 @@ import { DietEditor } from '../nutrition/DietEditor';
 import { copyDietTemplate, loadDietTemplate, saveDietTemplate, setDietTemplateActive } from '../nutrition/service';
 import { DIET_GOAL_LABELS, DIET_TEXTS, newDietContent, toInput } from '../nutrition/texts';
 import type { Failure } from '../workouts/service';
-import { Chip, Segmented } from '../workouts/parts';
+import { Dropdown, RadioGroup } from '../workouts/parts';
 import { failureText } from '../workouts/texts';
 import { fonts, useTheme } from '../theme';
 
@@ -128,26 +128,18 @@ export default function DietTemplate() {
           ) : null}
           <View style={{ marginTop: 18, gap: 16 }} pointerEvents={readOnly ? 'none' : 'auto'}>
             <Field label="Template name" value={name} onChangeText={setName} maxLength={80} error={nameError} editable={!readOnly} />
-            <View style={{ gap: 6 }}>
-              <Text style={[textStyles.label, { color: colors.inkMuted }]}>GOAL</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }} accessibilityRole="radiogroup" accessibilityLabel="Goal">
-                {DIET_GOALS.map((value) => (
-                  <Chip key={value} label={DIET_GOAL_LABELS[value]} selected={goal === value} onPress={() => setGoal(value)} />
-                ))}
-              </View>
-            </View>
+            <Dropdown label="Goal" value={goal} onChange={setGoal} options={DIET_GOALS.map((value) => ({ value, label: DIET_GOAL_LABELS[value] }))} />
             <View style={{ gap: 6 }}>
               <Text style={[textStyles.label, { color: colors.inkMuted }]}>WHO CAN USE IT</Text>
-              <Segmented
+              <RadioGroup
                 label="Who can use it"
                 value={visibility}
                 onChange={setVisibility}
                 options={[
-                  { value: 'gym', label: 'Whole gym' },
-                  { value: 'personal', label: 'Only me' },
+                  { value: 'gym', label: 'Whole gym', sub: 'Every coach can use it. Only you and the Head Coach can edit it.' },
+                  { value: 'personal', label: 'Only me', sub: 'Only you can see and use it.' },
                 ]}
               />
-              <Text style={[textStyles.small, { color: colors.inkMuted }]}>Gym templates can be used by every coach. Only you and the Head Coach can edit one.</Text>
             </View>
           </View>
 

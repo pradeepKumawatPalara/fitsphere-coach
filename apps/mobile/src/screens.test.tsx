@@ -10,6 +10,7 @@ let mockParams: Record<string, string> = {};
 jest.mock('expo-router', () => ({
   useRouter: () => mockRouter,
   useLocalSearchParams: () => mockParams,
+  useFocusEffect: (callback: () => void) => require('react').useEffect(callback, []),
 }));
 
 beforeEach(() => {
@@ -42,7 +43,7 @@ describe('Sign up', () => {
     await fireEvent.press(create);
     await screen.findByRole('button', { name: 'Create account' });
     expect(calls.some((call) => call.method === 'signUp')).toBe(true);
-    expect(mockRouter.replace).toHaveBeenCalledWith('/check-email?email=asha%40irongym.in');
+    expect(mockRouter.replace).not.toHaveBeenCalledWith(expect.stringContaining('/check-email'));
   });
 });
 

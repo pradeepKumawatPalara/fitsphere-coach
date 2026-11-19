@@ -35,7 +35,7 @@ export function destinationFor(state: AccountState): string {
     case 'coachingOff':
       return '/coaching-off';
     case 'emailNotVerified':
-      return `/check-email?email=${encodeURIComponent(state.email ?? '')}`;
+      return '/sign-in';
     case 'signedOut':
       return '/sign-in?expired=1';
     default:

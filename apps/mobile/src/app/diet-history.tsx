@@ -1,5 +1,6 @@
 // A diet plan's history (CF07, docs/design/CF07-nutrition-management-ui.md §2.8): who changed what and when,
 // and an earlier published version can be restored as a new draft of the working copy.
+import { useFocusTick } from '../focus';
 import type { PlanHistoryResponse } from '@fitsphere-coach/shared';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -16,6 +17,7 @@ export default function DietHistory() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { deps } = useAuth();
   const router = useRouter();
+  const focused = useFocusTick();
   const { colors } = useTheme();
   const [history, setHistory] = useState<PlanHistoryResponse | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -34,7 +36,7 @@ export default function DietHistory() {
     return () => {
       current = false;
     };
-  }, [deps, id, router]);
+  }, [deps, id, router, focused]);
 
   async function restore(version: number) {
     if (!id) return;

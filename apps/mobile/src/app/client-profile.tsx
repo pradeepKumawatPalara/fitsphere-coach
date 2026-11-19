@@ -1,6 +1,7 @@
 // One client (CF04, docs/design/CF04-client-management-ui.md §2.5 to §2.7): who their coach is, how
 // they are doing, and, for the Head Coach, moving them to another coach. Removing ends the link and
 // deletes nothing. The server decides who may open, move or remove (invariants 1, 14).
+import { useFocusTick } from '../focus';
 import type { ClientListResponse, ClientProfile } from '@fitsphere-coach/shared';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -11,6 +12,7 @@ import { TEXTS } from '../auth/texts';
 import { Banner, Icon, IconTile, PrimaryButton, PushedLayout, SecondaryButton, Sheet, textStyles, type IconName } from '../components/ui';
 import { loadClientProfile, loadClients, moveClient, removeClient, type ChangeResult } from '../clients/service';
 import { CLIENT_TEXTS, coachLabel, lastLoggedText, sinceText } from '../clients/texts';
+import { FITNESS_GOAL_LABELS } from '../clients/service';
 import { fonts, radius, useTheme } from '../theme';
 
 type SheetKind = 'move' | 'remove' | null;
@@ -20,6 +22,7 @@ export default function ClientProfileScreen() {
   const { deps } = useAuth();
   const { state } = useAccount();
   const router = useRouter();
+  const focused = useFocusTick();
   const { colors } = useTheme();
   const [profile, setProfile] = useState<ClientProfile | null>(null);
   const [coaches, setCoaches] = useState<ClientListResponse['coaches']>([]);
@@ -48,7 +51,7 @@ export default function ClientProfileScreen() {
     return () => {
       current = false;
     };
-  }, [deps, id, isHead, router]);
+  }, [deps, id, isHead, router, focused]);
 
   // Where this client can go: the Head Coach themselves, or a Coach of the gym, but not where they are.
   const targets = [
@@ -90,11 +93,33 @@ export default function ClientProfileScreen() {
 
       {profile ? (
         <>
+          {profile.waiting ? (
+            <View style={{ marginTop: 18 }}>
+              <Banner kind="info">{CLIENT_TEXTS.waitingBanner(profile.email ?? 'their email')}</Banner>
+            </View>
+          ) : null}
+          {profile.email ? (
+            <>
+              <Text style={[textStyles.label, styles.section, { color: colors.inkMuted }]}>DETAILS</Text>
+              <Card>
+                <Row label="Email" value={profile.email} />
+                {profile.phone ? <Row label="Phone" value={profile.phone} /> : null}
+                {profile.fitnessGoal ? <Row label="Goal" value={FITNESS_GOAL_LABELS[profile.fitnessGoal] ?? profile.fitnessGoal} /> : null}
+                {profile.notes ? <Row label="Notes" value={profile.notes} /> : null}
+                <Row label="Gym member" value={profile.isGymMember ? 'Yes' : 'No'} last />
+              </Card>
+              <View style={{ marginTop: 10 }}>
+                <SecondaryButton label="Edit client" onPress={() => router.push(`/client-edit?id=${id}` as never)} />
+              </View>
+            </>
+          ) : null}
           <Card style={{ marginTop: 18 }}>
             <Row label="Coach" value={coachLabel(profile.coachId, profile.coachName, myId)} />
             <Row label="Since" value={sinceText(profile.startedAt)} last />
           </Card>
 
+          {!profile.waiting ? (
+            <>
           <Text style={[textStyles.label, styles.section, { color: colors.inkMuted }]}>PROGRESS</Text>
           <Card>
             <Row label="Latest weight" value={profile.latestWeightKg === null ? 'Not logged' : `${profile.latestWeightKg} kg`} />
@@ -109,10 +134,14 @@ export default function ClientProfileScreen() {
 
           <Text style={[textStyles.label, styles.section, { color: colors.inkMuted }]}>PLANS AND SCHEDULE</Text>
           <Card>
-            <LinkRow icon="activity" title="Training plan" text="Open workouts" onPress={() => router.push('/workouts?tab=plans' as never)} />
+            <LinkRow icon="activity" title="Training plan · Exercises" text="See their exercises and what they logged" onPress={() => router.push(`/client-exercises?id=${id}` as never)} />
+            <LinkRow icon="coffee" title="Food log" text="What they logged in the FitSphere app" onPress={() => router.push(`/client-nutrition?id=${id}` as never)} />
             <LinkRow icon="coffee" title="Diet plan" text="Open nutrition" onPress={() => router.push('/nutrition?tab=plans' as never)} />
-            <LinkRow icon="calendar" title="Calendar" text="Not set yet" last />
+            <LinkRow icon="calendar" title="Calendar" text="Open calendar" onPress={() => router.push(`/calendar-client?id=${id}` as never)} last />
           </Card>
+
+            </>
+          ) : null}
 
           <View style={{ marginTop: 24, gap: 8 }}>
             {isHead && targets.length > 0 ? (
@@ -125,7 +154,7 @@ export default function ClientProfileScreen() {
               />
             ) : null}
             <Pressable onPress={() => setSheet('remove')} accessibilityRole="button" accessibilityLabel="Remove client" style={styles.remove}>
-              <Text style={[styles.removeText, { color: colors.danger }]}>REMOVE CLIENT</Text>
+              <Text style={[styles.removeText, { color: colors.danger }]}>{profile.waiting ? 'CANCEL WAITING' : 'REMOVE CLIENT'}</Text>
             </Pressable>
           </View>
 
@@ -165,9 +194,9 @@ export default function ClientProfileScreen() {
               <IconTile name="user-x" size={56} />
             </View>
             <Text accessibilityRole="header" style={[textStyles.sheetTitle, { color: colors.ink, marginTop: 16 }]}>
-              {`REMOVE ${profile.name.split('@')[0]?.toUpperCase() ?? ''}?`}
+              {profile.waiting ? 'CANCEL WAITING?' : `REMOVE ${profile.name.split('@')[0]?.toUpperCase() ?? ''}?`}
             </Text>
-            <Text style={[textStyles.body, { color: colors.inkMuted, marginTop: 8 }]}>{CLIENT_TEXTS.removeBody(profile.name)}</Text>
+            <Text style={[textStyles.body, { color: colors.inkMuted, marginTop: 8 }]}>{profile.waiting ? CLIENT_TEXTS.cancelWaitingBody(profile.name) : CLIENT_TEXTS.removeBody(profile.name)}</Text>
             <View style={{ marginTop: 20, gap: 10 }}>
               <Pressable
                 onPress={() => id && void change(() => removeClient(deps, id), 'list')}
@@ -177,7 +206,7 @@ export default function ClientProfileScreen() {
                 accessibilityState={{ disabled: working, busy: working }}
                 style={[styles.confirmRemove, { backgroundColor: colors.danger, opacity: working ? 0.6 : 1 }]}
               >
-                {working ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={[styles.confirmText, { color: colors.onPrimary }]}>REMOVE CLIENT</Text>}
+                {working ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={[styles.confirmText, { color: colors.onPrimary }]}>{profile.waiting ? 'CANCEL WAITING' : 'REMOVE CLIENT'}</Text>}
               </Pressable>
               <SecondaryButton label="Keep client" onPress={() => setSheet(null)} disabled={working} />
             </View>

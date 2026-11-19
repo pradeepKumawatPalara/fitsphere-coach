@@ -22,7 +22,13 @@ import { ApiError } from './errors.ts';
 import { approvalEmail, type Mailer } from './mailer.ts';
 import type { Settings } from './settings.ts';
 
-export type OnboardingDeps = { settings: Settings; mailer: Mailer; now?: () => Date };
+export type OnboardingDeps = {
+  settings: Settings;
+  mailer: Mailer;
+  now?: () => Date;
+  /** Local testing only (set by server.ts from LOCAL_TEST_APPROVAL_CODE): every request uses this code. */
+  fixedCode?: string;
+};
 
 type Queryable = Pick<pg.Pool, 'query'>;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -101,10 +107,45 @@ export async function submitGymRequest(
   const { settings } = deps;
   const now = nowOf(deps);
   const id = randomUUID();
-  const code = generateCode(settings.approvalCodeLength);
+  const code = deps.fixedCode ?? generateCode(settings.approvalCodeLength);
   const codeHash = hashCode(settings.approvalCodeSecret, id, code);
   const expiresAt = new Date(now.getTime() + settings.gymRequestValidDays * DAY_MS);
   const extraFields = input.websiteOrInstagram ? { website_or_instagram: input.websiteOrInstagram } : {};
+
+  // C-D31 (proposed): no approval. The gym exists at once; no code, no email. One transaction.
+  if (!settings.gymApprovalRequired) {
+    const client = await db.connect();
+    try {
+      await client.query('begin');
+      await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [`gym-onboarding:${account.id}`]);
+      await client.query(`update coach.gym_onboarding_requests set status = 'replaced' where applicant_id = $1 and status = 'pending'`, [
+        account.id,
+      ]);
+      // The code column is required; nothing is ever sent or checked, so a throwaway hash is stored.
+      const throwaway = hashCode(settings.approvalCodeSecret || randomUUID(), id, randomUUID());
+      await client.query(
+        `insert into coach.gym_onboarding_requests
+           (id, applicant_id, gym_name, address, city, pincode, owner_phone, total_trainees, extra_fields,
+            status, code_hash, created_at, expires_at, approved_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'approved', $10, $11, $11, $11)`,
+        [id, account.id, input.gymName, input.address, input.city, input.pincode, input.ownerPhone, input.totalTrainees, JSON.stringify(extraFields), throwaway, now],
+      );
+      await client.query(
+        `insert into coach.gyms (head_coach_id, request_id, name, address, city, pincode, owner_phone, total_trainees, extra_fields, approved_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [account.id, id, input.gymName, input.address, input.city, input.pincode, input.ownerPhone, input.totalTrainees, JSON.stringify(extraFields), now],
+      );
+      await client.query(`insert into app.user_roles (user_id, role) values ($1, 'head_coach') on conflict do nothing`, [account.id]);
+      await client.query('commit');
+    } catch (error) {
+      await client.query('rollback').catch(() => undefined);
+      if ((error as { code?: unknown }).code === '23505') throw new ApiError('ALREADY_HEAD_COACH');
+      throw error;
+    } finally {
+      client.release();
+    }
+    return { status: 'approved', expiresAt: null, triesLeft: null, requestsLeftToday: 0, codeLength: settings.approvalCodeLength, gymName: input.gymName };
+  }
 
   const insert = (client: pg.PoolClient, status: 'pending' | 'not_sent') =>
     client.query(

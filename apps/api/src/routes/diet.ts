@@ -1,5 +1,7 @@
 // Nutrition management routes (CF07). For a Coach or Head Coach; every handler also checks that the
 // template or client is theirs to see (invariant 1).
+//   GET  /v1/foods                           the food list (app.foods): ?q= ?group= ?limit= ?offset=, with servings
+//   GET  /v1/foods/groups                    food groups with counts
 //   GET/POST /v1/diet-templates              list (?q ?goal ?includeInactive) / create
 //   GET/PUT  /v1/diet-templates/{id}         one / edit
 //   POST /v1/diet-templates/{id}/copy | /deactivate | /activate
@@ -13,6 +15,7 @@ import {
   assignDietPlanRequestSchema,
   DIET_GOALS,
   dietTemplateRequestSchema,
+  FOOD_PAGE_SIZE,
   idSchema,
   PLAN_STATUSES,
   restorePlanRequestSchema,
@@ -28,6 +31,7 @@ import {
   listDietPlans, listDietTemplates, publishDietPlan, restoreDietPlan, setDietTemplateActive, updateDietPlan, updateDietTemplate,
 } from '../diet.ts';
 import { ApiError } from '../errors.ts';
+import { foodGroups, searchFoods } from '../foods.ts';
 
 export function registerDietRoutes(app: FastifyInstance, deps: { db: pg.Pool | Pick<pg.Pool, 'query'> }) {
   function pool(): pg.Pool {
@@ -53,6 +57,25 @@ export function registerDietRoutes(app: FastifyInstance, deps: { db: pg.Pool | P
     return value;
   }
   const route = { config: { access: 'coach' as const } };
+
+  function whole(query: Record<string, unknown>, name: string, min: number, max: number): number | undefined {
+    const value = query[name];
+    if (value === undefined) return undefined;
+    const number = typeof value === 'string' && /^[0-9]{1,6}$/.test(value) ? Number(value) : Number.NaN;
+    if (!(number >= min && number <= max)) throw new ApiError('VALIDATION_FAILED', [{ field: name, issue: 'out_of_range' }]);
+    return number;
+  }
+
+  app.get(`${API_BASE_PATH}/foods`, route, async (request) => {
+    const query = request.query as Record<string, unknown>;
+    return searchFoods(deps.db, {
+      q: option(query, 'q', null),
+      group: option(query, 'group', null),
+      limit: whole(query, 'limit', 1, 100) ?? FOOD_PAGE_SIZE,
+      offset: whole(query, 'offset', 0, 100000),
+    });
+  });
+  app.get(`${API_BASE_PATH}/foods/groups`, route, async () => foodGroups(deps.db));
 
   app.get(`${API_BASE_PATH}/diet-templates`, route, async (request) => {
     const query = request.query as Record<string, unknown>;

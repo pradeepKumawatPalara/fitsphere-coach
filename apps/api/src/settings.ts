@@ -4,6 +4,8 @@
 // starting value and allowed range.
 
 export type Settings = {
+  /** false = no approval: a gym is approved when its form is sent (C-D31, proposed). */
+  gymApprovalRequired: boolean;
   approvalInbox: string;
   senderEmail: string;
   senderDisplayName: string;
@@ -83,7 +85,14 @@ export function loadSettings(env: Env): Settings {
     return value;
   };
 
+  // C-D31 (proposed): no approval for gym registration. Default true keeps the old behaviour; set
+  // GYM_APPROVAL_REQUIRED=false to approve a gym the moment its form is sent (no email, no code).
+  const approvalValue = env.GYM_APPROVAL_REQUIRED?.trim().toLowerCase();
+  if (approvalValue && approvalValue !== 'true' && approvalValue !== 'false') problems.push('GYM_APPROVAL_REQUIRED must be true or false');
+  const gymApprovalRequired = approvalValue !== 'false';
+
   const settings: Settings = {
+    gymApprovalRequired,
     approvalInbox: text('APPROVAL_INBOX', (value) => EMAIL.test(value), 'an email address'),
     senderEmail: text('SENDER_EMAIL', (value) => EMAIL.test(value), 'an email address'),
     senderDisplayName: text('SENDER_DISPLAY_NAME', (value) => value.length <= 50, '1 to 50 characters'),
@@ -94,8 +103,9 @@ export function loadSettings(env: Env): Settings {
     traineeInviteValidDays: whole('TRAINEE_INVITE_VALID_DAYS', 1, 30),
     invitesPerDay: whole('INVITES_PER_DAY', 1, 100),
     traineeInvitesEnabled: flag('TRAINEE_INVITES_ENABLED'),
-    approvalCodeSecret: secret('APPROVAL_CODE_SECRET', SECRET_MIN_LENGTH),
-    smtpAppPassword: secret('SMTP_APP_PASSWORD', 1),
+    // Only needed while FitSphere approval is on.
+    approvalCodeSecret: gymApprovalRequired ? secret('APPROVAL_CODE_SECRET', SECRET_MIN_LENGTH) : (env.APPROVAL_CODE_SECRET ?? ''),
+    smtpAppPassword: gymApprovalRequired ? secret('SMTP_APP_PASSWORD', 1) : (env.SMTP_APP_PASSWORD ?? ''),
   };
 
   if (problems.length > 0) throw new SettingsError(problems);

@@ -2,13 +2,15 @@
 // §2.2 to §2.5): targets, a note, meal slots (a custom slot "logs as" one of the four app meals), options
 // with ingredients from the FitSphere food list, the protein source first, and live totals against the
 // targets. The server checks and fills in everything again; this only helps the coach build.
-import { dayTotals, DIET_DISCLAIMER, FOODS, MAX_INGREDIENTS, MAX_OPTIONS, MAX_SLOTS, MEAL_TYPES, optionTotals, type DietContent, type DietOption, type DietSlot, type Food, type Nutrition } from '@fitsphere-coach/shared';
-import { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { dayTotals, DIET_DISCLAIMER, MAX_INGREDIENTS, MAX_OPTIONS, MAX_SLOTS, MEAL_TYPES, optionTotals, type DietContent, type DietOption, type DietSlot, type Food, type Nutrition } from '@fitsphere-coach/shared';
+import { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAuth } from '../auth/AuthProvider';
 import { Banner, Field, Icon, PrimaryButton, SecondaryButton, textStyles } from '../components/ui';
 import { fonts, radius, useTheme } from '../theme';
-import { ActionLink, Card, Chip, NumField, SectionLabel } from '../workouts/parts';
+import { ActionLink, Card, Chip, Dropdown, NumField, SectionLabel } from '../workouts/parts';
+import { loadFoodGroups, searchFoods } from './service';
 import { deviationText, DIET_TEXTS, ingredientFrom, ingredientSummary, MEAL_LABELS, newOption, numText, offTarget, totalsText, withGrams, withProteinSource } from './texts';
 
 type Props = { content: DietContent; onChange: (content: DietContent) => void; disabled?: boolean };
@@ -31,6 +33,9 @@ export function DietEditor({ content, onChange, disabled }: Props) {
   return (
     <View pointerEvents={disabled ? 'none' : 'auto'} style={{ opacity: disabled ? 0.6 : 1 }}>
       <SectionLabel>Targets for this plan</SectionLabel>
+      <Text style={[textStyles.small, { color: colors.inkMuted, marginBottom: 8 }]}>
+        Optional daily goals for calories and protein. They show in the client's FitSphere app, and the client cannot change them. Leave empty to set none.
+      </Text>
       <View style={styles.pair}>
         <NumField label="Calories" suffix="kcal" value={content.calorieTarget} min={500} max={10000} onChange={(calorieTarget) => onChange({ ...content, calorieTarget })} />
         <NumField label="Protein" suffix="g" value={content.proteinTarget} min={10} max={500} onChange={(proteinTarget) => onChange({ ...content, proteinTarget })} />
@@ -70,14 +75,7 @@ export function DietEditor({ content, onChange, disabled }: Props) {
               {expanded ? (
                 <View style={[styles.slotBody, { borderTopColor: colors.border }]}>
                   <Field label="Slot name" value={slotItem.name} maxLength={30} onChangeText={(name) => setSlot(index, { ...slotItem, name })} />
-                  <View style={{ gap: 6 }}>
-                    <Text style={[textStyles.label, { color: colors.inkMuted }]}>LOGS AS</Text>
-                    <View style={styles.chips} accessibilityRole="radiogroup" accessibilityLabel="Logs as">
-                      {MEAL_TYPES.map((type) => (
-                        <Chip key={type} label={MEAL_LABELS[type]} selected={slotItem.logsAs === type} onPress={() => setSlot(index, { ...slotItem, logsAs: type })} />
-                      ))}
-                    </View>
-                  </View>
+                  <Dropdown label="Logs as" value={slotItem.logsAs} onChange={(type) => setSlot(index, { ...slotItem, logsAs: type })} options={MEAL_TYPES.map((type) => ({ value: type, label: MEAL_LABELS[type] }))} />
                   {slotItem.options.map((optionItem, i) => (
                     <Pressable key={i} onPress={() => setEditing({ slot: index, option: i })} accessibilityRole="button" accessibilityLabel={`${slotItem.name} option ${i + 1}, ${optionItem.name}`} style={[styles.optionRow, { borderTopColor: colors.border }]}>
                       <Text style={[styles.optionNumber, { color: colors.accent }]}>{i + 1}</Text>
@@ -175,7 +173,6 @@ function OptionModal({ visible, slotName, option, onChange, onRemove, onClose }:
   const insets = useSafeAreaInsets();
   const [adding, setAdding] = useState(false);
   const [openIngredient, setOpenIngredient] = useState<number | null>(null);
-  const hasProtein = option.ingredients.some((ingredient) => ingredient.proteinSource);
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -192,10 +189,9 @@ function OptionModal({ visible, slotName, option, onChange, onRemove, onClose }:
           <SectionLabel>Totals for this option</SectionLabel>
           <Totals totals={optionTotals(option)} />
 
-          <SectionLabel>Ingredients · protein source first</SectionLabel>
-          {option.ingredients.length > 0 && !hasProtein ? <Banner kind="info">{DIET_TEXTS.proteinInfo}</Banner> : null}
+          <SectionLabel>Ingredients</SectionLabel>
           <Card style={{ marginTop: 8 }}>
-            {option.ingredients.length === 0 ? <Text style={[textStyles.body, { color: colors.inkMuted, padding: 14 }]}>No ingredients yet. Add the protein source first.</Text> : null}
+            {option.ingredients.length === 0 ? <Text style={[textStyles.body, { color: colors.inkMuted, padding: 14 }]}>No ingredients yet.</Text> : null}
             {option.ingredients.map((ingredient, i) => {
               const expanded = openIngredient === i;
               return (
@@ -252,9 +248,9 @@ function OptionModal({ visible, slotName, option, onChange, onRemove, onClose }:
         visible={adding}
         onClose={() => setAdding(false)}
         onAdd={(food, grams, label) => {
-          // The first ingredient of an option starts as its protein source; the coach can change that.
-          const next = ingredientFrom(food, grams, label, !hasProtein && food.per100g.proteinG >= 10);
-          onChange({ ...option, ingredients: next.proteinSource ? withProteinSource([...option.ingredients, next], option.ingredients.length, true) : [...option.ingredients, next] });
+          // The protein source mark is optional; the coach can set it on any ingredient.
+          const next = ingredientFrom(food, grams, label, false);
+          onChange({ ...option, ingredients: [...option.ingredients, next] });
           setAdding(false);
         }}
       />
@@ -262,19 +258,62 @@ function OptionModal({ visible, slotName, option, onChange, onRemove, onClose }:
   );
 }
 
-/** The ten fixed foods, filtered by what is typed, then how much (grams or one of the food's servings). */
+/** FitSphere's food list (searched on the server, with a group filter), then how much (grams or one of the food's servings). */
 function FoodPicker({ visible, onClose, onAdd }: { visible: boolean; onClose: () => void; onAdd: (food: Food, grams: number, label: string | null) => void }) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const { deps } = useAuth();
   const [search, setSearch] = useState('');
+  const [group, setGroup] = useState('');
+  const [groups, setGroups] = useState<{ value: string; count: number }[]>([]);
+  const [shown, setShown] = useState<Food[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [picked, setPicked] = useState<Food | null>(null);
   const [grams, setGrams] = useState<number | null>(100);
   const [label, setLabel] = useState<string | null>(null);
-  const foods = FOODS.filter((food) => food.name.toLowerCase().includes(search.trim().toLowerCase()));
+  const latest = useRef(0);
+
+  // The group filter comes from the food list itself, once the picker is first opened.
+  useEffect(() => {
+    if (!visible || groups.length > 0) return;
+    void loadFoodGroups(deps).then((result) => {
+      if (result.kind === 'ok') setGroups(result.body.groups);
+    });
+  }, [visible, groups.length, deps]);
+
+  // A new search (a short pause after typing, straight away for a filter) replaces the list.
+  useEffect(() => {
+    if (!visible) return;
+    const request = ++latest.current;
+    const timer = setTimeout(() => {
+      setLoading(true);
+      setFailed(false);
+      void searchFoods(deps, { q: search, ...(group ? { group } : {}) }).then((result) => {
+        if (request !== latest.current) return;
+        setLoading(false);
+        if (result.kind !== 'ok') return setFailed(true);
+        setShown(result.body.foods);
+        setTotal(result.body.total);
+      });
+    }, search ? 300 : 0);
+    return () => clearTimeout(timer);
+  }, [visible, deps, search, group]);
+
+  async function loadMore() {
+    setLoading(true);
+    const result = await searchFoods(deps, { q: search, ...(group ? { group } : {}), offset: shown.length });
+    setLoading(false);
+    if (result.kind !== 'ok') return setFailed(true);
+    setShown((current) => [...current, ...result.body.foods]);
+    setTotal(result.body.total);
+  }
 
   function close() {
     setPicked(null);
     setSearch('');
+    setGroup('');
     onClose();
   }
 
@@ -287,13 +326,21 @@ function FoodPicker({ visible, onClose, onAdd }: { visible: boolean; onClose: ()
             <Text style={[textStyles.label, { color: colors.inkMuted, fontSize: 15 }]}>OPTION</Text>
           </Pressable>
           <Text accessibilityRole="header" style={[styles.title, { color: colors.ink }]}>ADD INGREDIENT</Text>
-          <Text style={[textStyles.body, { color: colors.inkMuted, marginTop: 6 }]}>{DIET_TEXTS.foodInfo}</Text>
-          <View style={{ marginTop: 16 }}>
+          <Text style={[textStyles.body, { color: colors.inkMuted, marginTop: 6 }]}>
+            {total > 0 ? `${total} foods from the FitSphere food list. ${DIET_TEXTS.foodInfo}` : DIET_TEXTS.foodInfo}
+          </Text>
+          <View style={{ marginTop: 16, gap: 12 }}>
             <Field label="Search foods" value={search} onChangeText={setSearch} placeholder="Search foods" autoCapitalize="none" autoCorrect={false} />
+            {groups.length > 0 ? <Dropdown label="Food group" value={group} onChange={setGroup} options={[{ value: '', label: 'All groups' }, ...groups.map((g) => ({ value: g.value, label: `${g.value} (${g.count})` }))]} /> : null}
           </View>
-          {foods.length === 0 ? <Text style={[textStyles.body, { color: colors.inkMuted, textAlign: 'center', marginTop: 24 }]}>No foods match.</Text> : null}
+          {failed ? (
+            <View style={{ marginTop: 16 }}>
+              <Banner kind="error">Could not load foods. Try again.</Banner>
+            </View>
+          ) : null}
+          {!loading && !failed && shown.length === 0 ? <Text style={[textStyles.body, { color: colors.inkMuted, textAlign: 'center', marginTop: 24 }]}>No foods match.</Text> : null}
           <View style={{ marginTop: 16, gap: 8 }}>
-            {foods.map((food) => {
+            {shown.map((food) => {
               const on = picked?.id === food.id;
               return (
                 <Pressable
@@ -319,6 +366,12 @@ function FoodPicker({ visible, onClose, onAdd }: { visible: boolean; onClose: ()
               );
             })}
           </View>
+          {loading ? <ActivityIndicator color={colors.accent} accessibilityLabel="Loading" style={{ marginTop: 16 }} /> : null}
+          {!loading && shown.length < total ? (
+            <View style={{ marginTop: 12 }}>
+              <SecondaryButton label={`Show more (${total - shown.length} left)`} onPress={() => void loadMore()} />
+            </View>
+          ) : null}
           {picked ? (
             <View style={{ marginTop: 18, gap: 12 }}>
               <Text style={[textStyles.label, { color: colors.inkMuted }]}>{`QUANTITY OF ${picked.name.toUpperCase()}`}</Text>

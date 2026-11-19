@@ -1,5 +1,6 @@
 // Client list (CF04, docs/design/CF04-client-management-ui.md §2.1). A Coach sees their own clients;
 // the Head Coach sees the whole gym and can filter by Coach. The server decides who is listed.
+import { useFocusTick } from '../focus';
 import type { ClientListResponse } from '@fitsphere-coach/shared';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
@@ -16,9 +17,11 @@ export default function Clients() {
   const { deps } = useAuth();
   const { state } = useAccount();
   const router = useRouter();
+  const focused = useFocusTick();
   const { colors } = useTheme();
   const [search, setSearch] = useState('');
   const [coachId, setCoachId] = useState<string | undefined>(undefined);
+  const [status, setStatus] = useState<'all' | 'waiting'>('all');
   const [list, setList] = useState<ClientListResponse | null>(null);
   const [problem, setProblem] = useState<'offline' | 'unavailable' | null>(null);
   const [loading, setLoading] = useState(true);
@@ -42,7 +45,7 @@ export default function Clients() {
   useEffect(() => {
     const timer = setTimeout(() => void load(), search ? 300 : 0);
     return () => clearTimeout(timer);
-  }, [load, search]);
+  }, [load, search, focused]);
 
   // Resend is inviting the same email again; cancel ends the pending invitation.
   async function resend(email: string, coachId: string) {
@@ -56,7 +59,9 @@ export default function Clients() {
     else setProblem(outcome === 'offline' ? 'offline' : 'unavailable');
   }
 
-  const clients = list?.clients ?? [];
+  const everyone = list?.clients ?? [];
+  const waitingCount = everyone.filter((client) => client.waiting).length;
+  const clients = status === 'waiting' ? everyone.filter((client) => client.waiting) : everyone;
   const invitations = list?.invitations ?? [];
   const coaches = list?.coaches ?? [];
 
@@ -64,6 +69,12 @@ export default function Clients() {
     <PushedLayout backLabel="Home" onBack={() => (router.canGoBack() ? router.back() : router.replace('/home'))} title="Clients">
       <View style={{ marginTop: 18, gap: 12 }}>
         <Field label="Search clients" value={search} onChangeText={setSearch} placeholder="Search by email" autoCapitalize="none" autoCorrect={false} returnKeyType="search" />
+        {waitingCount > 0 ? (
+          <View style={styles.chips} accessibilityRole="radiogroup" accessibilityLabel="Status">
+            <Chip label={`All ${everyone.length}`} selected={status === 'all'} onPress={() => setStatus('all')} />
+            <Chip label={`Waiting ${waitingCount}`} selected={status === 'waiting'} onPress={() => setStatus('waiting')} />
+          </View>
+        ) : null}
         {coaches.length > 0 ? (
           <View style={styles.chips} accessibilityRole="radiogroup">
             <Chip label="All coaches" selected={!coachId} onPress={() => setCoachId(undefined)} />
@@ -113,9 +124,10 @@ export default function Clients() {
             <View style={{ flex: 1 }}>
               <Text numberOfLines={1} style={[styles.name, { color: colors.ink }]}>{client.name}</Text>
               <Text numberOfLines={1} style={[styles.sub, { color: colors.inkMuted }]}>
-                {lastLoggedText(client.lastLoggedAt)} · {coachLabel(client.coachId, client.coachName, myId)}
+                {client.waiting ? CLIENT_TEXTS.waitingSub : lastLoggedText(client.lastLoggedAt)} · {coachLabel(client.coachId, client.coachName, myId)}
               </Text>
             </View>
+            {client.waiting ? <Text style={[styles.badge, { color: colors.warning }]}>WAITING</Text> : null}
           </Pressable>
         ))}
       </View>
@@ -140,8 +152,13 @@ export default function Clients() {
         </View>
       ) : null}
 
-      {list?.canInvite ? (
+      {list?.canAdd ? (
         <View style={{ marginTop: 24 }}>
+          <PrimaryButton label="Add client" arrow onPress={() => router.push('/client-add')} />
+        </View>
+      ) : null}
+      {list?.canInvite ? (
+        <View style={{ marginTop: 12 }}>
           <PrimaryButton label="Invite client" arrow onPress={() => router.push('/client-invite')} />
         </View>
       ) : null}
@@ -165,6 +182,7 @@ function Chip({ label, selected, onPress }: { label: string; selected: boolean; 
 }
 
 const styles = StyleSheet.create({
+  badge: { fontFamily: fonts.display, fontSize: 12, letterSpacing: 1 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { minHeight: 44, paddingHorizontal: 12, borderWidth: 1.5, borderRadius: radius.sm, justifyContent: 'center' },
   chipText: { fontFamily: fonts.displayBold, fontSize: 14, letterSpacing: 1 },

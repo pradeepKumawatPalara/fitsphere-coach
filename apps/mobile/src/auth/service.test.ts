@@ -37,7 +37,7 @@ describe('passwordRules (CF01 §1)', () => {
 describe('signUp (CAUTH-006)', () => {
   it('sends the 18+ confirmation, the tidied name and the coach terms in the metadata', async () => {
     const { client, calls } = fakeClient();
-    expect(await signUp(deps(client), { fullName: '  Asha   Rao ', email: ' Asha@IronGym.in ', password: 'irongym2026' })).toBe('sent');
+    expect(await signUp(deps(client), { fullName: '  Asha   Rao ', email: ' Asha@IronGym.in ', password: 'irongym2026' })).toBe('notCreated');
     expect(calls[0]?.args[0]).toEqual({
       email: 'asha@irongym.in',
       password: 'irongym2026',
@@ -45,9 +45,9 @@ describe('signUp (CAUTH-006)', () => {
     });
   });
 
-  it('shows the same next step whatever Supabase answers, except when the phone is offline', async () => {
+  it('gives one neutral answer whatever Supabase says about a taken email, except when the phone is offline', async () => {
     const taken = fakeClient({ signUp: async () => ({ error: { status: 422, code: 'user_already_exists' } }) });
-    expect(await signUp(deps(taken.client), { fullName: 'Asha Rao', email: 'a@b.co', password: 'irongym2026' })).toBe('sent');
+    expect(await signUp(deps(taken.client), { fullName: 'Asha Rao', email: 'a@b.co', password: 'irongym2026' })).toBe('notCreated');
     const noNet = fakeClient({ signUp: async () => ({ error: offline }) });
     expect(await signUp(deps(noNet.client), { fullName: 'Asha Rao', email: 'a@b.co', password: 'irongym2026' })).toBe('offline');
   });
@@ -57,13 +57,13 @@ describe('signUp (CAUTH-006)', () => {
     expect(await signUp(deps(confirmed.client), { fullName: 'Asha Rao', email: 'a@b.co', password: 'irongym2026' })).toBe('signedIn');
   });
 
-  it('still asks to check the inbox when Supabase sends a link (no session) or the email is taken', async () => {
+  it('reports notCreated, never a check-email step, when there is no session or the email is taken', async () => {
     const link = fakeClient({ signUp: async () => ({ data: { session: null }, error: null }) });
-    expect(await signUp(deps(link.client), { fullName: 'Asha Rao', email: 'a@b.co', password: 'irongym2026' })).toBe('sent');
+    expect(await signUp(deps(link.client), { fullName: 'Asha Rao', email: 'a@b.co', password: 'irongym2026' })).toBe('notCreated');
     const taken = fakeClient({
       signUp: async () => ({ data: { session: null }, error: { status: 422, code: 'user_already_exists' } }),
     });
-    expect(await signUp(deps(taken.client), { fullName: 'Asha Rao', email: 'a@b.co', password: 'irongym2026' })).toBe('sent');
+    expect(await signUp(deps(taken.client), { fullName: 'Asha Rao', email: 'a@b.co', password: 'irongym2026' })).toBe('notCreated');
   });
 });
 

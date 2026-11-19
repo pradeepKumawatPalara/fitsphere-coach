@@ -6,6 +6,7 @@ import {
   type OnboardingStatus,
 } from '@fitsphere-coach/shared';
 import { callApi } from '../api/client';
+import { recordProblem } from '../api/debug';
 
 // Sign-up, log in, account setup and passwords (CAUTH-001…006). The app talks to Supabase Auth for
 // the session (shared with the trainee app) and to the coach API for the account. Same approach
@@ -26,7 +27,6 @@ export type AuthClient = {
     data?: { session: MinimalSession | null } | null;
     error: ErrorLike;
   }>;
-  resend(params: { type: 'signup'; email: string; options: { emailRedirectTo: string } }): Promise<{ error: ErrorLike }>;
   signInWithPassword(credentials: { email: string; password: string }): SessionResult;
   signOut(options: { scope: 'local' | 'others' | 'global' }): Promise<{ error: ErrorLike }>;
   getSession(): SessionResult;
@@ -60,16 +60,14 @@ export type SignUpInput = { fullName: string; email: string; password: string };
 
 /**
  * Coach sign-up. The 18+ confirmation, the name and the coach terms version go into the sign-in
- * account's metadata, so account setup can send them once the email is confirmed (on any phone).
- * Whatever Supabase answers, the app shows the same "check your inbox" step (invariant 3); only a
- * request that never left the phone is reported.
+ * account's metadata for account setup.
  *
- * Exception (C-D9): the shared Supabase project has "Confirm email" switched off, so a new
- * account comes back already confirmed and signed in, and no email is sent. Then the coach goes
- * straight on ('signedIn') instead of waiting for a link that never comes. A taken email never
- * returns a session, so it still gets the "check your inbox" step.
+ * No email verification (C-D9, owner 2026-11-13): the shared Supabase project has "Confirm email"
+ * switched off, so a new account comes back confirmed and signed in, and the coach goes straight on
+ * ('signedIn'). A taken email never returns a session; it gets one neutral 'notCreated' text that
+ * does not say why (invariant 3). Only a request that never left the phone is reported as offline.
  */
-export async function signUp(deps: AuthDeps, input: SignUpInput): Promise<'sent' | 'signedIn' | 'offline' | 'unavailable'> {
+export async function signUp(deps: AuthDeps, input: SignUpInput): Promise<'signedIn' | 'notCreated' | 'offline' | 'unavailable'> {
   try {
     const { data, error } = await deps.client.signUp({
       email: input.email.trim().toLowerCase(),
@@ -87,21 +85,8 @@ export async function signUp(deps: AuthDeps, input: SignUpInput): Promise<'sent'
     if (isOffline(error)) return 'offline';
     if (error && (error.status ?? 0) >= 500) return 'unavailable';
     if (!error && data?.session) return 'signedIn';
-    return 'sent';
-  } catch {
-    return 'offline';
-  }
-}
-
-/** Sends the verify email again; the screen shows the same text whatever happens. */
-export async function resendVerification(deps: AuthDeps, email: string): Promise<'sent' | 'offline'> {
-  try {
-    const { error } = await deps.client.resend({
-      type: 'signup',
-      email: email.trim().toLowerCase(),
-      options: { emailRedirectTo: deps.links.verified },
-    });
-    return isOffline(error) ? 'offline' : 'sent';
+    // No session: the email is already registered. The screen gives one neutral text (invariant 3).
+    return 'notCreated';
   } catch {
     return 'offline';
   }
@@ -115,9 +100,13 @@ export async function signIn(deps: AuthDeps, email: string, password: string): P
     const { data, error } = await deps.client.signInWithPassword({ email: email.trim().toLowerCase(), password });
     if (isOffline(error)) return 'offline';
     if (isRateLimited(error)) return 'locked';
-    if (error && (error.status ?? 0) >= 500) return 'unavailable';
+    if (error && (error.status ?? 0) >= 500) {
+      recordProblem(`sign in -> ${error.status} from the sign-in service`);
+      return 'unavailable';
+    }
     return data.session ? 'signedIn' : 'failed';
-  } catch {
+  } catch (error) {
+    recordProblem(`sign in could not connect (${error instanceof Error ? error.name : 'error'})`);
     return 'offline';
   }
 }

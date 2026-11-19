@@ -7,6 +7,8 @@ import type {
   DietPlanSummary,
   DietTemplateDetail,
   DietTemplateSummary,
+  FoodGroupsResponse,
+  FoodListResponse,
   PlanHistoryResponse,
 } from '@fitsphere-coach/shared';
 import type { AuthDeps } from '../auth/service';
@@ -61,7 +63,7 @@ export async function loadDietPlan(deps: AuthDeps, id: string): Promise<Result<D
 }
 
 export async function assignDietPlans(deps: AuthDeps, templateId: string, traineeIds: string[], startDate: string, scale: boolean): Promise<Result<DietPlanSummary[]>> {
-  return unwrap(await call<{ plans: DietPlanSummary[] }>(deps, '/diet-plans', 'POST', { templateId, traineeIds, startDate, scale }), 'plans');
+  return unwrap(await call<{ plans: DietPlanSummary[] }>(deps, '/diet-plans', 'POST', { templateId, traineeIds, startDate, scale, publish: true }), 'plans');
 }
 
 export async function saveDietPlan(deps: AuthDeps, id: string, request: { name: string; startDate: string; content: DietInput }): Promise<Result<DietPlanDetail>> {
@@ -81,3 +83,18 @@ export async function restoreDietPlan(deps: AuthDeps, id: string, version: numbe
 }
 
 export const loadDietHistory = (deps: AuthDeps, id: string): Promise<Result<PlanHistoryResponse>> => call<PlanHistoryResponse>(deps, `/diet-plans/${enc(id)}/history`);
+
+// --- The food list (read only on the server; owned by the trainee app) ---
+
+export type FoodFilter = { q?: string; group?: string; offset?: number };
+
+export function searchFoods(deps: AuthDeps, filter: FoodFilter = {}): Promise<Result<FoodListResponse>> {
+  const params = new URLSearchParams();
+  if (filter.q?.trim()) params.set('q', filter.q.trim());
+  if (filter.group) params.set('group', filter.group);
+  if (filter.offset) params.set('offset', String(filter.offset));
+  const query = params.toString();
+  return call<FoodListResponse>(deps, `/foods${query ? `?${query}` : ''}`);
+}
+
+export const loadFoodGroups = (deps: AuthDeps) => call<FoodGroupsResponse>(deps, '/foods/groups');

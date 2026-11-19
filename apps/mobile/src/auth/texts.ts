@@ -5,6 +5,7 @@ export const TEXTS = {
   locked: 'Too many attempts. Try again in 5 minutes, or reset your password.',
   sessionExpired: 'You were signed out. Log in to pick up where you left off.',
   offline: "Couldn't reach FitSphere. Check your connection and try again.",
+  signUpNotCreated: "We couldn't create this account. If you already have one, log in.",
   tryLater: 'Something went wrong. Try again later.',
   ageConfirmation: 'I am 18 or older',
   ageHint: 'Tick "I am 18 or older" to continue.',

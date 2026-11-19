@@ -1,18 +1,47 @@
-# FitSphere Coach — Project Scope (v0.4)
+# FitSphere Coach — Project Scope (v0.5)
 
 | | |
 |---|---|
-| **Version** | 0.4.1 — 2026-11-04 (adds who can add and remove whom, a trainee once per gym, and moving a removed Coach's trainees, §3.4) |
-| **Status** | Owner's scope refinement of 2026-11-03 and 2026-11-04 (decisions C-D10 to C-D21), with the owner's answers of the same day (§11). C-D16 accepted by ADR-0005. |
+| **Version** | 0.5 — 2026-11-12 (new approach: the Gym Owner adds the gym and everyone in it; no approval process, §0). Earlier: 0.4.1 — 2026-11-04. |
+| **Status** | Owner's change of approach of 2026-11-12 (decision C-D31, **Proposed** until the owner accepts it). Everything else is the owner's scope of 2026-11-03 and 2026-11-04 (C-D10 to C-D21) with the answers in §11, except where §0 supersedes it. |
 | **Authority** | This file is the scope of record. Where `coach-spec.md` (v0.3) disagrees, this file wins. Project rules in `CLAUDE.md` (C-D22 first) still win over both. |
 
 ---
 
+## 0. Change of approach, v0.5 (C-D31, 2026-11-12)
+
+**Only the Gym Owner (admin) adds the gym, and adds the Head Coaches, Coaches and clients of that
+gym. There is no approval process for registering a gym.**
+
+| Topic | Before (v0.4) | Now (v0.5) |
+|---|---|---|
+| Registering a gym | Gym form, 6-digit code emailed to FitSphere, 7-day wait, owner enters the code (§4) | The Gym Owner enters the gym details and the gym exists at once. **No approval, no code, no email to FitSphere, no waiting.** |
+| Who becomes Head Coach | The gym owner, after approval | The Gym Owner **adds** one or more Head Coaches (the Gym Owner may also act as one; Q11) |
+| Who adds Coaches | The Head Coach, by invitation (§5, C-D11) | The **Gym Owner** adds Coaches directly. Whether Head Coaches may also add Coaches is Q12. |
+| Who adds clients (trainees) | Head Coach or Coach, by invitation the trainee accepts (§3.4) | The **Gym Owner** adds clients directly (add, view, edit, deactivate: `spec/SPEC-001`). Whether Head Coaches and Coaches may also add clients, and whether the client still has to accept, is Q12 and Q13. |
+| Top role | Head Coach | **Gym Owner (admin)**, above Head Coach. Full access to the gym, its people and its clients. |
+
+What this supersedes: **§4 (gym onboarding with approval) and §4.3 to §4.5 are no longer in
+force**, and in §5 the invitation route for Coaches no longer applies. They stay in this file as
+history until the owner accepts C-D31. Everything not named here is unchanged: permission checks on
+the server, the change log (C-D13), a Coach's personal training staying private (C-D15), "a
+trainee is in a gym only once" (C-D19), one Coach per trainee, and the shared-database rules.
+
+Rules that need review once C-D31 is accepted (they are written for the old approach, and this
+file does not change them by itself):
+- Project invariants 11 (approval codes), 12 (Coaches only by invitation) and 18 (one gym per
+  email, "a Head Coach or a Coach cannot send a gym request").
+- C-D18 ("only the person higher up adds or removes") gains a new top: the Gym Owner. A Coach still
+  cannot remove their Head Coach.
+- CF02 (gym onboarding and approval code, built) and CF03 (invitations) change; see §7.
+
+---
+
 ## 1. The product in one paragraph
-FitSphere Coach is a separate phone app (Android and iOS) for gyms. A **gym owner** registers the
-gym and becomes its **Head Coach** after FitSphere approves the registration. The Head Coach invites
-**Coaches**; coaches look after **trainees**, who use the FitSphere (trainee) app. Both apps share
-one Supabase project: the same logins and the same database.
+FitSphere Coach is a separate phone app (Android and iOS) for gyms. The **Gym Owner (admin)**
+registers the gym, with no approval step, and adds its **Head Coaches**, **Coaches** and
+**clients** (trainees) directly (v0.5, §0). Coaches look after clients, who use the FitSphere
+(trainee) app. Both apps share one Supabase project: the same logins and the same database.
 
 ---
 
@@ -20,8 +49,9 @@ one Supabase project: the same logins and the same database.
 
 | Role | Who | How they get the role | Uses which app |
 |---|---|---|---|
-| **Head Coach** | The person who registers a gym | Gym onboarding, approved by FitSphere with a one-time code (§4) | FitSphere Coach |
-| **Coach** | A person who coaches trainees in a gym | **Only** by accepting a Head Coach's invitation (§5) | FitSphere Coach |
+| **Gym Owner (admin)** *(new, v0.5)* | The person who registers the gym | Registers the gym directly; **no approval** (§0) | FitSphere Coach |
+| **Head Coach** | A person who manages Coaches and oversees clients | **Added by the Gym Owner** (§0). *(v0.4: the gym's registrant, after approval.)* | FitSphere Coach |
+| **Coach** | A person who coaches trainees in a gym | **Added by the Gym Owner** (§0). *(v0.4: only by accepting a Head Coach's invitation.)* | FitSphere Coach |
 | **Trainee** (Personal Training User) | A person who logs food, workouts and body data | Signs up in the trainee app | FitSphere app only |
 
 - A Coach belongs to **one** Head Coach (one gym). There are no independent coaches (C-D11).
@@ -84,7 +114,9 @@ Adding and removing only works **downwards**: the person higher up decides.
 
 ---
 
-## 4. Gym onboarding with FitSphere approval (C-D10)
+## 4. Gym onboarding with FitSphere approval (C-D10) — **SUPERSEDED by §0 (C-D31, Proposed)**
+*Kept as history. Under v0.5 there is no approval code and no wait; the Gym Owner creates the gym
+and adds its people directly.*
 
 ### 4.1 Who goes through it
 - **Everyone who uses the coach app without a Coach or Head Coach role follows the same route**,
@@ -109,7 +141,7 @@ Adding and removing only works **downwards**: the person higher up decides.
 3. **Request approval:** the person taps "Send request". The system:
    - saves the request with status **Pending** and an expiry **7 days** from now;
    - creates a **6-digit approval code** (one-time password, OTP);
-   - emails the code and the gym details to **FitSphere's approval inbox: `appbayaipower@gmail.com`**.
+   - emails the code and the gym details to **FitSphere's approval inbox: `pradeeppalara@gmail.com`**.
 4. **FitSphere approves:** the FitSphere team checks the gym and, if satisfied, gives the code to the
    gym owner (by phone, message or email; outside the app).
 5. **Enter the code:** the gym owner enters the 6-digit code in the app.
@@ -152,8 +184,8 @@ change. Every variable, its starting value and its allowed range are listed in `
 
 | Setting | Starting value |
 |---|---|
-| Approval inbox (where codes are emailed) | `appbayaipower@gmail.com` |
-| Sender email | `appbayaipower@gmail.com` |
+| Approval inbox (where codes are emailed) | `pradeeppalara@gmail.com` |
+| Sender email | `unnatigaur123@gmail.com` |
 | Sender display name | `FitSphere Coach` |
 | Code length | 6 digits |
 | Days a request stays valid | 7 |
@@ -168,7 +200,7 @@ change. Every variable, its starting value and its allowed range are listed in `
 
 ### 4.5 How the approval email is sent (C-D16, ADR-0005 — Accepted)
 - Sent through **Gmail with a Google app password**, from **"FitSphere Coach"
-  <appbayaipower@gmail.com>** to the approval inbox `appbayaipower@gmail.com`.
+  <unnatigaur123@gmail.com>** to the approval inbox `pradeeppalara@gmail.com`.
 - Sender email, display name and approval inbox are environment variables (ADR-0008); the app password is
   in `apps/api/.env` (never in the repo).
 - If an app password cannot be created for that account, another Gmail account can send instead by
@@ -176,7 +208,7 @@ change. Every variable, its starting value and its allowed range are listed in `
 
 ---
 
-## 5. Coaches join only by invitation (C-D11, C-D14)
+## 5. Coaches join only by invitation (C-D11, C-D14) — **SUPERSEDED by §0 (C-D31, Proposed): the Gym Owner adds Coaches directly**
 - Coaches cannot sign up on their own. A Coach account exists only through a Head Coach's invitation.
 - The Head Coach enters the person's email.
 - **If that email already has the Coach role**, the app shows: **"This email is already available
@@ -222,9 +254,9 @@ change. Every variable, its starting value and its allowed range are listed in `
 |---|---|---|
 | CF00 | Foundation | Done |
 | CF01 | Sign-in, sign-up, passwords, log out | Built; phone check in progress. Sign-up's next step changes to gym onboarding (CF02). "Coaching is off" changes to "Onboard your gym / wait for an invitation". |
-| **CF02** | **Gym onboarding and FitSphere approval code** (§4) | **Next** — screens to be designed and approved |
-| CF03 | Head Coach invites Coaches; Coach accepts; "already a Coach" check; Head Coach removes a Coach; Coaches cannot leave (§5, §3.4) | After CF02 |
-| CF04 | Coach or Head Coach adds and removes trainees; trainee list and profile; Head Coach sees each trainee's Coach (§3.4) | Coach side, then TCR-001 |
+| **CF02** | ~~Gym onboarding and FitSphere approval code~~ (§4) → **Gym Owner sets up the gym directly, no approval** (§0) | **Changes under C-D31** (the built approval-code flow is to be removed or replaced once C-D31 is accepted; UI to be redesigned and approved) |
+| CF03 | ~~Head Coach invites Coaches~~ → **Gym Owner adds Head Coaches and Coaches directly**; Coach and Head Coach lists; remove a Coach; Coaches cannot leave (§0, §3.4) | After CF02, redesigned under C-D31 |
+| CF04 | **Gym Owner** (and, if Q12 says so, Head Coach and Coach) adds, views, edits and deactivates clients; client list and profile; each client's Coach (§3.4, `spec/SPEC-001`) | Coach side, then TCR-001 (changes with Q13) |
 | CF05 | Targets (Coach and Head Coach) with change log | Coach side, then TCR-002 |
 | CF06 | Training plans with change log | Coach side, then TCR-003 |
 | CF07 | Diet plans with change log | Coach side, then TCR-004 |
@@ -278,9 +310,15 @@ change. Every variable, its starting value and its allowed range are listed in `
 | Q1 | What "Head Coach can perform every task over the coach that a coach can perform over the trainee" means | **Answered 2026-11-03:** the Head Coach can do everything a Coach does for the Coach's trainees (see data, set targets and plans), and also invites, lists and removes Coaches. Never sees or sets a Coach's own personal training (C-D12, C-D15). |
 | Q2 | Detect a "completely new email" on the log-in screen? | **Answered:** no. Log in stays as it is; Create account leads to gym onboarding (§4.1). |
 | Q3 | Does an existing FitSphere trainee who logs in follow a different route? | **Answered:** no. Every account without a coach role follows the same gym onboarding route (§4.1). |
-| Q4 | How the server emails the approval code | **Answered:** Gmail with an app password, from `appbayaipower@gmail.com` as "FitSphere Coach" (C-D16, ADR-0005). |
+| Q4 | How the server emails the approval code | **Answered:** Gmail with an app password, from `unnatigaur123@gmail.com` as "FitSphere Coach" (C-D16, ADR-0005). |
 | Q5 | Wrong-try and request limits | **Answered:** keep them outside the code (environment variables, ADR-0008) so they change without code (C-D17, §4.4). Starting values: 5 wrong tries, 3 requests a day. |
 | Q6 | Which extra gym fields come next (phone, city, GST number, …) | **Answered 2026-11-11 with the CF02 UI:** owner phone, city and pincode (required), and an optional website or Instagram link. GST number and others can come later; the form stores extra fields without database changes. |
 | Q7 | Trainees are no longer asked to "Allow" the Head Coach (C-D12). Should trainees be told, or asked, when trainees join? | Open. To be settled in TCR-001 (the trainee agrees to share their data with the gym). |
 | Q8 | Can the same trainee be added twice in one gym, and whose trainee are they when the Head Coach adds them? | **Answered 2026-11-04:** a trainee is added to a gym only once, by their Coach or the Head Coach; a second add shows "This trainee is already added." (C-D19). When the Head Coach adds a trainee, they choose "under myself" or "under a Coach" (C-D21). |
+| Q10 | Is the Gym Owner a new, separate role above Head Coach, with its own sign-in to this phone app (or a separate admin dashboard)? `spec/README.md` already lists Gym Owner, Head Coach, Coach / Trainer and Client. | **Open (C-D31).** Assumed here: a role in this app. |
+| Q11 | Can the Gym Owner also act as a Head Coach, and can a gym have more than one Head Coach? | Open |
+| Q12 | Which of Gym Owner, Head Coach and Coach may add Coaches and clients? ("Only the Gym Owner" is the instruction; `spec/SPEC-001` still says Head Coach and Coach may manage clients "as permitted".) | Open. Assumed here: only the Gym Owner adds Head Coaches, Coaches and clients. |
+| Q13 | When the Gym Owner adds a person (Coach or client), do they get a login created by the owner, or do they sign up and the owner links them? Does a client still accept and consent to share data (C-D26, TCR-001)? | Open. Consent for sharing health data may still be required by law. |
+| Q13a | Answer to Q13, 2026-11-12 | **Answered:** the Gym Owner can create the client's account; the admin's add stands as the client's consent for the gym. Still to confirm with Legal. |
+| Q14 | What happens to the gym-onboarding screens and the approval code already built (CF02, migration C0003)? | Open; decided when C-D31 is accepted. |
 | Q9 | When the Head Coach removes a Coach, what happens to that Coach's trainees? | **Answered 2026-11-04:** the Head Coach first moves them to another Coach or to themselves; removal is refused until the Coach has no trainees (C-D20). |

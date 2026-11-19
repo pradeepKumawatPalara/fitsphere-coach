@@ -95,7 +95,8 @@ async function log(
   summary: string | null = null,
 ) {
   await tx.query(
-    `insert into coach.plan_changes (plan_id, action, version, actor_id, actor_role, summary) values ($1, $2, $3, $4, $5, $6)`,
+    // clock_timestamp(): two entries in one transaction (created, then published) keep their order.
+    `insert into coach.plan_changes (plan_id, action, version, actor_id, actor_role, summary, created_at) values ($1, $2, $3, $4, $5, $6, clock_timestamp())`,
     [planId, action, version, viewer.id, roleOf(viewer), summary],
   );
 }
@@ -195,7 +196,8 @@ export async function getPlan(db: Queryable, viewer: Account, id: string): Promi
     ...toSummary(row),
     content: row.content,
     lastChange: await lastChange(db, id),
-    canPublish: row.status !== 'ended' && (await appPlansExist(db)),
+    canPublish: row.status !== 'ended',
+    clientSees: await appPlansExist(db),
   };
 }
 
@@ -213,6 +215,8 @@ export async function assignPlans(db: pg.Pool, viewer: Account, request: AssignP
   if (request.startDate < (await today(db))) {
     throw new ApiError('VALIDATION_FAILED', [{ field: 'startDate', issue: 'out_of_range' }]);
   }
+  // Publishing on assign needs a plan that can go live; the check comes before anything is written.
+  if (request.publish && !planIsReady(template.content)) throw new ApiError('PLAN_NOT_READY');
   const traineeIds = [...new Set(request.traineeIds)];
 
   const ids = await transaction(db, async (tx) => {
@@ -225,8 +229,11 @@ export async function assignPlans(db: pg.Pool, viewer: Account, request: AssignP
         [viewer.id, isHeadCoach(viewer), traineeId],
       );
       if (!rowCount) throw NOT_FOUND();
-      const existing = await tx.query(`select 1 from coach.training_plans where trainee_id = $1 and status = 'draft'`, [traineeId]);
-      if (existing.rowCount) throw new ApiError('PLAN_DRAFT_EXISTS');
+      const existing = await tx.query<{ id: string }>(`select id from coach.training_plans where trainee_id = $1 and status = 'draft'`, [traineeId]);
+      if (existing.rowCount && !request.publish) throw new ApiError('PLAN_DRAFT_EXISTS');
+      // Publishing on assign replaces an unpublished draft. The client never saw it, so it is removed
+      // (an ended plan must have been live; its change log goes with it).
+      for (const old of existing.rows) await tx.query(`delete from coach.training_plans where id = $1 and status = 'draft'`, [old.id]);
       const { rows } = await tx.query<{ id: string }>(
         `insert into coach.training_plans (trainee_id, gym_head_coach_id, created_by, template_id, name, status, start_date, content)
          values ($1, $2, $3, $4, $5, 'draft', $6, $7) returning id`,
@@ -236,6 +243,7 @@ export async function assignPlans(db: pg.Pool, viewer: Account, request: AssignP
       await log(tx, id, viewer, 'created', 1, `From template ${template.name}`.slice(0, 200));
       created.push(id);
     }
+    if (request.publish) for (const id of created) await publishPlan(db, viewer, id, tx);
     return created;
   });
 
@@ -278,14 +286,22 @@ async function requirePlanForUpdate(tx: pg.PoolClient, viewer: Account, id: stri
   return rows[0];
 }
 
-export async function publishPlan(db: pg.Pool, viewer: Account, id: string): Promise<void> {
-  // Off until the trainee app has the table (TCR-003): the same answer as a route that does not exist.
-  if (!(await appPlansExist(db))) throw NOT_FOUND();
-  await transaction(db, async (tx) => {
+/** Runs inside the caller's transaction when one is given (assign and publish in one step), else in its own. */
+const inTransaction = <T>(db: pg.Pool, within: pg.PoolClient | undefined, work: (tx: pg.PoolClient) => Promise<T>): Promise<T> =>
+  within ? work(within) : transaction(db, work);
+
+export async function publishPlan(db: pg.Pool, viewer: Account, id: string, within?: pg.PoolClient): Promise<void> {
+  // Publishing works in the coach schema on its own: the plan becomes the client's active plan (and the
+  // calendar can use it). The trainee's copy in `app.training_plans` is written only once Developer 1 has
+  // built that table (TCR-003, C-D22: this repo never creates it); until then the client does not see it.
+  await inTransaction(db, within, async (tx) => {
+    const mirror = await appPlansExist(tx);
     const plan = await requirePlanForUpdate(tx, viewer, id);
     if (plan.status === 'ended') throw new ApiError('NOT_PERMITTED');
     if (!planIsReady(plan.content)) throw new ApiError('PLAN_NOT_READY');
-    if (plan.status === 'active' && plan.live_version === plan.version) return; // nothing new to publish
+    const live = plan.status === 'active' && plan.live_version === plan.version;
+    // Nothing new to publish, unless the trainee's table has appeared since and this plan is not in it yet.
+    if (live && (!mirror || (await tx.query('select 1 from app.training_plans where id = $1', [id])).rowCount)) return;
 
     if (plan.status === 'draft') {
       // One live plan per client: the one being replaced ends in this same transaction.
@@ -295,24 +311,26 @@ export async function publishPlan(db: pg.Pool, viewer: Account, id: string): Pro
         [plan.trainee_id],
       );
       for (const row of old.rows) {
-        await tx.query(`update app.training_plans set status = 'ended', ended_at = now() where id = $1`, [row.id]);
+        if (mirror) await tx.query(`update app.training_plans set status = 'ended', ended_at = now() where id = $1`, [row.id]);
         await log(tx, row.id, viewer, 'ended', row.version, 'Replaced by a new plan');
       }
     }
 
-    await tx.query(
-      `update coach.training_plans
-       set status = 'active', live_version = version, published_at = now(), updated_at = now() where id = $1`,
-      [id],
-    );
-    await tx.query(`insert into coach.plan_versions (plan_id, version, name, content, published_by) values ($1, $2, $3, $4, $5)`, [
-      id,
-      plan.version,
-      plan.name,
-      JSON.stringify(plan.content),
-      viewer.id,
-    ]);
-    await tx.query(
+    if (!live) {
+      await tx.query(
+        `update coach.training_plans
+         set status = 'active', live_version = version, published_at = now(), updated_at = now() where id = $1`,
+        [id],
+      );
+      await tx.query(`insert into coach.plan_versions (plan_id, version, name, content, published_by) values ($1, $2, $3, $4, $5)`, [
+        id,
+        plan.version,
+        plan.name,
+        JSON.stringify(plan.content),
+        viewer.id,
+      ]);
+    }
+    if (mirror) await tx.query(
       `insert into app.training_plans
          (id, user_id, version, name, status, weeks, schedule_mode, weekly_target, daily_target, start_date, days,
           set_by_user_id, set_by_role, published_at)
@@ -338,7 +356,7 @@ export async function publishPlan(db: pg.Pool, viewer: Account, id: string): Pro
         roleOf(viewer),
       ],
     );
-    await log(tx, id, viewer, 'published', plan.version);
+    if (!live) await log(tx, id, viewer, 'published', plan.version);
   });
 }
 

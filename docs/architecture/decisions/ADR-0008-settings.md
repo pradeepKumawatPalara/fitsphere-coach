@@ -54,8 +54,8 @@ scalability 10%, cost 10%, integration 10%.
 
 | Variable | Starting value | Allowed range |
 |---|---|---|
-| `APPROVAL_INBOX` | `appbayaipower@gmail.com` | A valid email |
-| `SENDER_EMAIL` | `appbayaipower@gmail.com` | A valid email |
+| `APPROVAL_INBOX` | `pradeeppalara@gmail.com` | A valid email |
+| `SENDER_EMAIL` | `unnatigaur123@gmail.com` | A valid email |
 | `SENDER_DISPLAY_NAME` | `FitSphere Coach` | 1–50 characters |
 | `APPROVAL_CODE_LENGTH` | `6` | 4–8 |
 | `GYM_REQUEST_VALID_DAYS` | `7` | 1–30 |

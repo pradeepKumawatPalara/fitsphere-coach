@@ -1,6 +1,9 @@
 // Workout management calls (CF06). The server decides who sees and changes what; the app shows what
 // it answers and decides from the error code, never the message.
 import type {
+  ExerciseFiltersResponse,
+  ExerciseListResponse,
+  ExerciseSummary,
   PlanDetail,
   PlanHistoryResponse,
   PlanListResponse,
@@ -92,7 +95,7 @@ export async function loadPlan(deps: AuthDeps, id: string): Promise<Result<PlanD
 }
 
 export async function assignPlans(deps: AuthDeps, templateId: string, traineeIds: string[], startDate: string): Promise<Result<PlanSummary[]>> {
-  const result = await call<{ plans: PlanSummary[] }>(deps, '/training-plans', 'POST', { templateId, traineeIds, startDate });
+  const result = await call<{ plans: PlanSummary[] }>(deps, '/training-plans', 'POST', { templateId, traineeIds, startDate, publish: true });
   return result.kind === 'ok' ? { kind: 'ok', body: result.body.plans } : result;
 }
 
@@ -115,3 +118,24 @@ export async function restorePlan(deps: AuthDeps, id: string, version: number): 
 }
 
 export const loadHistory = (deps: AuthDeps, id: string): Promise<Result<PlanHistoryResponse>> => call<PlanHistoryResponse>(deps, `/training-plans/${enc(id)}/history`);
+
+// --- The exercise library (read only on the server; owned by the trainee app) ---
+
+export type ExerciseFilter = { q?: string; category?: string; muscle?: string; equipment?: string; offset?: number };
+
+export function searchExercises(deps: AuthDeps, filter: ExerciseFilter = {}): Promise<Result<ExerciseListResponse>> {
+  const params = new URLSearchParams();
+  if (filter.q?.trim()) params.set('q', filter.q.trim());
+  if (filter.category) params.set('category', filter.category);
+  if (filter.muscle) params.set('muscle', filter.muscle);
+  if (filter.equipment) params.set('equipment', filter.equipment);
+  if (filter.offset) params.set('offset', String(filter.offset));
+  const query = params.toString();
+  return call<ExerciseListResponse>(deps, `/exercises${query ? `?${query}` : ''}`);
+}
+
+export const loadExerciseFilters = (deps: AuthDeps) => call<ExerciseFiltersResponse>(deps, '/exercises/filters');
+
+/** The names of a plan's exercises, in one call (up to 60). */
+export const loadExerciseNames = (deps: AuthDeps, codes: string[]) =>
+  call<{ exercises: ExerciseSummary[] }>(deps, `/exercises?codes=${codes.map(enc).join(',')}`);

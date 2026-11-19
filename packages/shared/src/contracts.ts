@@ -24,6 +24,8 @@ export const REQUEST_ERROR_CODES = [
   'CANNOT_INVITE_EMAIL',
   'INVITE_LIMIT_REACHED',
   'INVITE_EMAIL_FAILED',
+  'CLIENT_NOT_REGISTERED',
+  'CLIENT_UNAVAILABLE',
   'ALREADY_HEAD_COACH',
   'ALREADY_COACH',
   'REQUEST_LIMIT_REACHED',
@@ -195,6 +197,8 @@ export const clientSummarySchema = z.object({
   coachName: z.string().nullable(),
   startedAt: instantSchema,
   lastLoggedAt: instantSchema.nullable(),
+  /** A client the gym added who has no FitSphere account yet (C-D31); `id` is then the waiting row's id. */
+  waiting: z.boolean().optional(),
 });
 export type ClientSummary = z.infer<typeof clientSummarySchema>;
 
@@ -214,6 +218,8 @@ export const clientListResponseSchema = z.object({
   coaches: z.array(z.object({ id: idSchema, name: z.string().nullable() })),
   /** Whether inviting is switched on (it waits for the trainee app, TCR-001, C-D22). */
   canInvite: z.boolean(),
+  /** The Gym Owner / Head Coach may add a client directly (C-D31). */
+  canAdd: z.boolean().optional(),
   /** Invitations sent and not yet answered; empty while inviting is off. */
   invitations: z.array(invitationSummarySchema),
 });
@@ -229,6 +235,13 @@ export const clientProfileSchema = clientSummarySchema.extend({
   }),
   /** Workouts logged this India week (Monday to Sunday). */
   workoutsThisWeek: z.number().int(),
+  /** Details the gym keeps in schema `coach` (C-D31); absent from older answers. */
+  email: z.string().optional(),
+  phone: z.string().nullable().optional(),
+  fitnessGoal: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  /** True for a client the Gym Owner added directly (`coach.gym_clients.is_gym_member`). */
+  isGymMember: z.boolean().optional(),
 });
 export type ClientProfile = z.infer<typeof clientProfileSchema>;
 
@@ -241,6 +254,51 @@ export const inviteClientRequestSchema = z.strictObject({
   coachId: idSchema.optional(),
 });
 export type InviteClientRequest = z.input<typeof inviteClientRequestSchema>;
+
+/**
+ * POST /v1/clients: the Gym Owner adds a client directly (C-D31, proposed). The account is created
+ * if the email has none. `fullName` is the client's name, kept in schema `coach`.
+ */
+export const addClientRequestSchema = z.strictObject({
+  email: z
+    .string()
+    .transform((value) => value.trim().toLowerCase())
+    .pipe(z.string().max(254).regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)),
+  fullName: z
+    .string()
+    .transform((value) => value.trim())
+    .pipe(z.string().min(2).max(80)),
+  coachId: idSchema.optional(),
+});
+export type AddClientRequest = z.input<typeof addClientRequestSchema>;
+
+export const FITNESS_GOALS = ['weight_loss', 'muscle_gain', 'strength', 'general_fitness', 'endurance', 'mobility'] as const;
+
+/** PUT /v1/clients/{id}: edit the details the gym keeps for a client. The email is the login and cannot change here. */
+export const updateClientRequestSchema = z.strictObject({
+  fullName: z
+    .string()
+    .transform((value) => value.trim())
+    .pipe(z.string().min(2).max(80)),
+  phone: z
+    .string()
+    .transform((value) => value.trim())
+    .pipe(z.string().regex(/^[0-9+() -]{7,20}$/))
+    .nullable(),
+  fitnessGoal: z.enum(FITNESS_GOALS).nullable(),
+  notes: z
+    .string()
+    .max(500)
+    .transform((value) => (value.trim() === '' ? null : value.trim()))
+    .nullable(),
+});
+export type UpdateClientRequest = z.input<typeof updateClientRequestSchema>;
+
+/**
+ * GET /v1/clients/available: FitSphere users who switched on "open to joining a gym" (TCR-007). `enabled` is
+ * false until the trainee app has that setting, and then `people` is always empty.
+ */
+export type ClientCandidatesResponse = { enabled: boolean; people: { id: string; email: string }[] };
 
 /** POST /v1/clients/{id}/move: the Head Coach moves a client to a coach of the gym, or to themselves. */
 export const moveClientRequestSchema = z.strictObject({ coachId: idSchema });

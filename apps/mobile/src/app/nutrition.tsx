@@ -1,5 +1,6 @@
 // Nutrition home (CF07, docs/design/CF07-nutrition-management-ui.md §2.1): diet templates and clients'
 // diet plans. The server decides what a coach sees.
+import { useFocusTick } from '../focus';
 import type { DietPlanListResponse, DietTemplateSummary } from '@fitsphere-coach/shared';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
@@ -10,7 +11,7 @@ import { TEXTS } from '../auth/texts';
 import { Banner, Field, Heading, Icon, IconTile, PrimaryButton, PushedLayout } from '../components/ui';
 import { loadDietPlans, loadDietTemplates } from '../nutrition/service';
 import { DIET_GOAL_LABELS, DIET_TEXTS } from '../nutrition/texts';
-import { Chip, Segmented, StatusChip, Tag } from '../workouts/parts';
+import { Chip, MultiDropdown, Segmented, StatusChip, Tag } from '../workouts/parts';
 import { failureText } from '../workouts/texts';
 import { fonts, radius, useTheme } from '../theme';
 
@@ -21,10 +22,16 @@ export default function Nutrition() {
   const { deps } = useAuth();
   const { state } = useAccount();
   const router = useRouter();
+  const focused = useFocusTick();
   const { colors } = useTheme();
   const [tab, setTab] = useState<Tab>(params.tab === 'plans' ? 'plans' : 'templates');
   const [search, setSearch] = useState('');
-  const [goal, setGoal] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (params.tab === 'plans') setTab('plans');
+  }, [params.tab]);
+  const [goals, setGoals] = useState<string[]>([]);
+  // The server filters by one goal; with several, it sends none and the list is cut here.
+  const goal = goals.length === 1 ? goals[0] : undefined;
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [coachId, setCoachId] = useState<string | undefined>(undefined);
   const [showInactive, setShowInactive] = useState(false);
@@ -57,10 +64,11 @@ export default function Nutrition() {
   useEffect(() => {
     const timer = setTimeout(() => void load(), search ? 300 : 0);
     return () => clearTimeout(timer);
-  }, [load, search]);
+  }, [load, search, focused]);
 
-  const list = tab === 'templates' ? templates : plans?.plans;
-  const filtered = Boolean(search || goal || status || coachId);
+  const shownTemplates = templates?.filter((template) => goals.length === 0 || goals.includes(template.goal));
+  const list = tab === 'templates' ? shownTemplates : plans?.plans;
+  const filtered = Boolean(search || goals.length || status || coachId);
 
   return (
     <PushedLayout backLabel="Home" onBack={() => (router.canGoBack() ? router.back() : router.replace('/home'))} title="Nutrition">
@@ -83,12 +91,13 @@ export default function Nutrition() {
       <View style={{ marginTop: 14, gap: 12 }}>
         <Field label={tab === 'templates' ? 'Search templates' : 'Search plans'} value={search} onChangeText={setSearch} placeholder={tab === 'templates' ? 'Search templates' : 'Search by client or plan'} autoCapitalize="none" autoCorrect={false} returnKeyType="search" />
         {tab === 'templates' ? (
-          <View style={styles.chips} accessibilityRole="radiogroup" accessibilityLabel="Goal">
-            <Chip label="All" selected={!goal} onPress={() => setGoal(undefined)} />
-            {Object.entries(DIET_GOAL_LABELS).map(([value, label]) => (
-              <Chip key={value} label={label} selected={goal === value} onPress={() => setGoal(value)} />
-            ))}
-          </View>
+          <MultiDropdown
+            label="Goal"
+            allLabel="All goals"
+            values={goals}
+            onChange={setGoals}
+            options={Object.entries(DIET_GOAL_LABELS).map(([value, label]) => ({ value, label }))}
+          />
         ) : (
           <>
             <View style={styles.chips} accessibilityRole="radiogroup" accessibilityLabel="Status">
@@ -134,27 +143,39 @@ export default function Nutrition() {
 
       <View style={{ marginTop: 16, gap: 8 }}>
         {tab === 'templates'
-          ? templates?.map((template) => (
-              <Pressable
-                key={template.id}
-                onPress={() => router.push(`/diet-template?id=${template.id}` as never)}
-                accessibilityRole="button"
-                accessibilityLabel={template.name}
-                style={[styles.row, { backgroundColor: colors.surface, borderColor: colors.border, opacity: template.active ? 1 : 0.6 }]}
-              >
-                <View style={[styles.tile, { backgroundColor: colors.accentTint }]}>
-                  <Icon name="coffee" color={colors.accent} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text numberOfLines={1} style={[styles.name, { color: colors.ink }]}>{template.name}</Text>
-                  <Text numberOfLines={1} style={[styles.meta, { color: colors.inkMuted }]}>{DIET_GOAL_LABELS[template.goal]}</Text>
-                  <Text numberOfLines={1} style={[styles.meta, { color: colors.inkSubtle }]}>
-                    {template.calorieTarget ? `${template.calorieTarget} kcal · ` : ''}
-                    {template.slots} slots · {template.options} options{template.active ? '' : ' · inactive'}
-                  </Text>
-                </View>
-                <Tag label={template.visibility === 'gym' ? 'Gym' : 'Mine'} tone={template.visibility === 'gym' ? 'accent' : 'plain'} />
-              </Pressable>
+          ? shownTemplates?.map((template) => (
+              <View key={template.id} style={[styles.templateCard, { backgroundColor: colors.surface, borderColor: colors.border, opacity: template.active ? 1 : 0.6 }]}>
+                <Pressable
+                  onPress={() => router.push(`/diet-template?id=${template.id}` as never)}
+                  accessibilityRole="button"
+                  accessibilityLabel={template.name}
+                  style={[styles.row, { borderWidth: 0 }]}
+                >
+                  <View style={[styles.tile, { backgroundColor: colors.accentTint }]}>
+                    <Icon name="coffee" color={colors.accent} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text numberOfLines={1} style={[styles.name, { color: colors.ink }]}>{template.name}</Text>
+                    <Text numberOfLines={1} style={[styles.meta, { color: colors.inkMuted }]}>{DIET_GOAL_LABELS[template.goal]}</Text>
+                    <Text numberOfLines={1} style={[styles.meta, { color: colors.inkSubtle }]}>
+                      {template.calorieTarget ? `${template.calorieTarget} kcal · ` : ''}
+                      {template.slots} slots · {template.options} options{template.active ? '' : ' · inactive'}
+                    </Text>
+                  </View>
+                  <Tag label={template.visibility === 'gym' ? 'Gym' : 'Mine'} tone={template.visibility === 'gym' ? 'accent' : 'plain'} />
+                </Pressable>
+                {template.active ? (
+                  <Pressable
+                    onPress={() => router.push(`/diet-assign?templateId=${template.id}` as never)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Assign ${template.name}`}
+                    style={[styles.assign, { borderTopColor: colors.border }]}
+                  >
+                    <Icon name="user-plus" size={18} color={colors.accent} />
+                    <Text style={[styles.assignText, { color: colors.accent }]}>ASSIGN TO CLIENTS</Text>
+                  </Pressable>
+                ) : null}
+              </View>
             ))
           : plans?.plans.map((plan) => (
               <Pressable
@@ -198,6 +219,9 @@ const styles = StyleSheet.create({
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   empty: { marginTop: 32, fontFamily: fonts.body, fontSize: 15, textAlign: 'center' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: radius.sm, paddingVertical: 12, paddingHorizontal: 14, minHeight: 68 },
+  templateCard: { borderWidth: 1, borderRadius: radius.sm },
+  assign: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 44, borderTopWidth: 1 },
+  assignText: { fontFamily: fonts.display, fontSize: 15, letterSpacing: 1 },
   tile: { width: 44, height: 44, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
   initial: { fontFamily: fonts.display, fontSize: 20 },
   name: { fontFamily: fonts.bodyMedium, fontSize: 16, lineHeight: 22 },

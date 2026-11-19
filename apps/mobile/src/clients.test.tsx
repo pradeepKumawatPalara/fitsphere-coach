@@ -1,7 +1,11 @@
 // CF04 client management: the list, the profile, moving and removing a client.
-import { fireEvent, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useAccount } from './account/AccountProvider';
+import ClientAdd from './app/client-add';
+import ClientEdit from './app/client-edit';
+import ClientExercises from './app/client-exercises';
+import ClientNutrition from './app/client-nutrition';
 import ClientProfileScreen from './app/client-profile';
 import Clients from './app/clients';
 import { coachLabel, lastLoggedText, sinceText } from './clients/texts';
@@ -12,6 +16,7 @@ let mockParams: Record<string, string> = {};
 jest.mock('expo-router', () => ({
   useRouter: () => mockRouter,
   useLocalSearchParams: () => mockParams,
+  useFocusEffect: (callback: () => void) => require('react').useEffect(callback, []),
 }));
 
 beforeEach(() => {
@@ -141,9 +146,10 @@ describe('Client profile', () => {
     expect(screen.getByText('140 g')).toBeTruthy();
     expect(screen.getByText('2 of 4')).toBeTruthy();
     expect(screen.getByText('Ravi Kumar')).toBeTruthy();
-    expect(screen.getAllByText('Not set yet')).toHaveLength(1);
+    expect(screen.queryByText('Not set yet')).toBeNull();
+    expect(screen.getByText('Open calendar')).toBeTruthy();
     expect(screen.getByText('Open nutrition')).toBeTruthy();
-    expect(screen.getByText('Open workouts')).toBeTruthy();
+    expect(screen.getByText('See their exercises and what they logged')).toBeTruthy();
   });
 
   it('shows "Not logged" and "Not set" for a client who has done nothing', async () => {
@@ -201,5 +207,229 @@ describe('Client profile', () => {
     await fireEvent.press(screen.getByRole('button', { name: 'Move client' }));
     await screen.findByText('Meera Joshi');
     expect(api.requests.find((request) => request.url.endsWith('/move'))).toMatchObject({ method: 'POST', body: { coachId: MEERA } });
+  });
+});
+
+const detailed = (extra: object = {}) =>
+  profile({ email: 'priya@example.test', phone: '+91 98765 43210', fitnessGoal: 'weight_loss', notes: 'Mild knee pain', isGymMember: true, ...extra });
+
+describe('Client profile details and edit', () => {
+  beforeEach(() => {
+    mockParams = { id: ARJUN };
+  });
+
+  it('shows the details the gym keeps and opens edit and the exercises', async () => {
+    await open(<ClientProfileScreen />, ['coach'], [detailed()]);
+    expect(await screen.findByText('priya@example.test')).toBeTruthy();
+    expect(screen.getByText('+91 98765 43210')).toBeTruthy();
+    expect(screen.getByText('Weight loss')).toBeTruthy();
+    expect(screen.getByText('Mild knee pain')).toBeTruthy();
+    await fireEvent.press(screen.getByRole('button', { name: 'Edit client' }));
+    expect(mockRouter.push).toHaveBeenCalledWith(`/client-edit?id=${ARJUN}`);
+    await fireEvent.press(screen.getByRole('button', { name: /Training plan · Exercises/ }));
+    expect(mockRouter.push).toHaveBeenCalledWith(`/client-exercises?id=${ARJUN}`);
+  });
+
+  it('edits the client: the email is locked, the goal and notes are sent, and it goes back', async () => {
+    const api = await open(<ClientEdit />, ['coach'], [detailed(), { status: 204, body: null }]);
+    const name = await screen.findByLabelText('Client name');
+    await fireEvent.changeText(name, '  Priya Nair ');
+    await fireEvent.press(screen.getByRole('radio', { name: 'Muscle gain' }));
+    await fireEvent.changeText(screen.getByLabelText('Notes (only your gym sees these)'), 'Avoid deep lunges');
+    await fireEvent.press(screen.getByRole('button', { name: 'Save changes' }));
+    await screen.findByText('Saved.');
+    const put = api.requests.find((request) => request.method === 'PUT');
+    expect(put).toMatchObject({ url: `http://api.test/v1/clients/${ARJUN}`, body: { fullName: 'Priya Nair', phone: '+91 98765 43210', fitnessGoal: 'muscle_gain', notes: 'Avoid deep lunges' } });
+    expect(mockRouter.back).toHaveBeenCalled();
+  });
+
+  it('does not save a too-short name or a bad phone number, and sends nothing', async () => {
+    const api = await open(<ClientEdit />, ['coach'], [detailed({ phone: null })]);
+    await fireEvent.changeText(await screen.findByLabelText('Client name'), 'P');
+    expect(screen.getByRole('button', { name: 'Save changes' }).props.accessibilityState?.disabled).toBe(true);
+    await fireEvent.changeText(screen.getByLabelText('Client name'), 'Priya');
+    await fireEvent.changeText(screen.getByLabelText('Phone (optional)'), 'abc');
+    expect(await screen.findByText('Enter a phone number like +91 98765 43210.')).toBeTruthy();
+    expect(api.requests.some((request) => request.method === 'PUT')).toBe(false);
+  });
+});
+
+describe('Client exercises', () => {
+  beforeEach(() => {
+    mockParams = { id: ARJUN };
+  });
+  const plan = (status = 'active') => ({
+    plan: {
+      id: 'p1',
+      name: 'Push Pull Legs',
+      status,
+      weeks: 8,
+      days: [
+        {
+          name: 'Push',
+          weekday: 1,
+          rest: false,
+          exercises: [
+            {
+              exerciseId: 'barbell-flat-bench-press',
+              name: 'Barbell Flat Bench Press',
+              sets: 4,
+              repsMin: 8,
+              repsMax: 10,
+              weightG: 60000,
+              rpe: 8,
+              restS: 120,
+              note: 'Pause on chest',
+              detail: {
+                code: 'barbell-flat-bench-press', name: 'Barbell Flat Bench Press', group: 'barbell', category: 'Barbell', primaryMuscle: 'Chest', equipment: 'Barbell', logType: 'weight_reps',
+                subGroup: null, musclesWorked: ['Triceps'], tags: [], steps: ['Lie flat', 'Press up'], watchFor: 'Keep your feet down', videoUrl: 'https://example.test/bench',
+              },
+            },
+          ],
+        },
+      ],
+    },
+    recent: [{ day: '2026-11-10', exercises: [{ name: 'Bench press', sets: 3, reps: 10, weightG: 50000, note: null }] }],
+  });
+
+  it('shows the plan, opens an exercise for its details, and lists what the client logged', async () => {
+    await open(<ClientExercises />, ['coach'], [{ status: 200, body: plan() }]);
+    expect(await screen.findByText('Barbell Flat Bench Press')).toBeTruthy();
+    expect(screen.getByText('4 × 8–10 · 60 kg · RPE 8 · Rest 2:00')).toBeTruthy();
+    expect(screen.queryByText('1. Lie flat')).toBeNull();
+    await fireEvent.press(screen.getByRole('button', { name: /Barbell Flat Bench Press, 4 × 8–10/ }));
+    expect(await screen.findByText('1. Lie flat')).toBeTruthy();
+    expect(screen.getByText('Watch for: Keep your feet down')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Watch video for Barbell Flat Bench Press' })).toBeTruthy();
+    expect(screen.getByText("Coach's note: Pause on chest")).toBeTruthy();
+    expect(screen.getByText('Bench press · 3 × 10 · 50 kg')).toBeTruthy();
+  });
+
+  it('says a draft is not published yet, and shows an empty state without a plan', async () => {
+    await open(<ClientExercises />, ['coach'], [{ status: 200, body: plan('draft') }]);
+    expect(await screen.findByText('Draft, not published to the client yet')).toBeTruthy();
+  });
+
+  it('shows the empty states', async () => {
+    await open(<ClientExercises />, ['coach'], [{ status: 200, body: { plan: null, recent: [] } }]);
+    expect(await screen.findByText('No training plan yet. Create one in Workouts and it appears here.')).toBeTruthy();
+    expect(screen.getByText('Nothing logged yet in the FitSphere app.')).toBeTruthy();
+  });
+});
+
+describe('Add client: people open to joining a gym', () => {
+  const candidates = (enabled: boolean, people: object[] = []) => ({ status: 200, body: { enabled, people } });
+
+  it('shows the people who opted in, and fills the email when one is tapped', async () => {
+    await open(<ClientAdd />, ['head_coach'], [list([], []), candidates(true, [{ id: ARJUN, email: 'arjun@example.test' }])]);
+    expect(await screen.findByText('PEOPLE OPEN TO JOINING A GYM')).toBeTruthy();
+    await fireEvent.press(await screen.findByRole('button', { name: 'Use arjun@example.test' }));
+    expect(screen.getByDisplayValue('arjun@example.test')).toBeTruthy();
+  });
+
+  it('hides the list until the trainee app has the setting', async () => {
+    await open(<ClientAdd />, ['head_coach'], [list([], []), candidates(false)]);
+    await screen.findByLabelText('Client email');
+    expect(screen.queryByText('PEOPLE OPEN TO JOINING A GYM')).toBeNull();
+  });
+});
+
+describe('Waiting clients', () => {
+  const waiting = (id: string, name: string) => ({ id, name, coachId: RAVI, coachName: 'Ravi Kumar', startedAt: '2026-11-12T08:00:00.000Z', lastLoggedAt: null, waiting: true });
+
+  it('lists a waiting client with a Waiting badge and filters by Waiting', async () => {
+    await open(<Clients />, ['coach'], [list([client(ARJUN, 'arjun@example.test'), waiting(MEERA, 'Waiting Wendy')])]);
+    expect(await screen.findByText('Waiting Wendy')).toBeTruthy();
+    expect(screen.getByText('WAITING')).toBeTruthy();
+    expect(screen.getByText(/Waiting for FitSphere account · Ravi Kumar/)).toBeTruthy();
+    await fireEvent.press(screen.getByRole('radio', { name: 'Waiting 1' }));
+    expect(screen.queryByText('arjun@example.test')).toBeNull();
+    expect(screen.getByText('Waiting Wendy')).toBeTruthy();
+  });
+
+  it('shows a waiting profile: a banner, no progress or plans, and a Cancel waiting button', async () => {
+    mockParams = { id: MEERA };
+    await open(<ClientProfileScreen />, ['coach'], [profile({ ...waiting(MEERA, 'Waiting Wendy'), email: 'wendy@example.test', latestWeightKg: null, targets: { calories: null, proteinG: null, weeklyWorkouts: null }, workoutsThisWeek: 0, isGymMember: false })]);
+    expect(await screen.findByText(/Waiting for a FitSphere account\. Ask them to sign up in the FitSphere app with wendy@example\.test/)).toBeTruthy();
+    expect(screen.queryByText('PROGRESS')).toBeNull();
+    expect(screen.queryByText('PLANS AND SCHEDULE')).toBeNull();
+    expect(screen.getByText('CANCEL WAITING')).toBeTruthy();
+    expect(screen.queryByText('REMOVE CLIENT')).toBeNull();
+  });
+
+  it('the add screen goes to the waiting message when the client has no account yet', async () => {
+    const api = await open(<ClientAdd />, ['coach'], [{ status: 201, body: { client: { id: MEERA, waiting: true } } }]);
+    await fireEvent.changeText(await screen.findByLabelText('Client name'), 'Waiting Wendy');
+    await fireEvent.changeText(screen.getByLabelText('Client email'), 'wendy@example.test');
+    await fireEvent.press(screen.getByRole('button', { name: 'Add client' }));
+    await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/client-added?name=Waiting%20Wendy&waiting=1'));
+    expect(api.requests.find((request) => request.method === 'POST')).toMatchObject({ body: { email: 'wendy@example.test', fullName: 'Waiting Wendy' } });
+  });
+});
+
+describe('Client food log', () => {
+  beforeEach(() => {
+    mockParams = { id: ARJUN };
+  });
+  const meal = (over: object = {}) => ({
+    id: 'm1', mealType: 'lunch', recordedAt: '2026-11-12T07:50:03.000Z', kcal: 473.23, proteinG: 5, carbsG: 61.5, fatG: 23, fibreG: null,
+    items: [{ name: 'Mango & Banana Fruit Clusters', amount: { value: 100, unit: 'g' }, kcal: 473.23, proteinG: 5, carbsG: 61.5, fatG: 23, estimated: false }],
+    photo: null, ...over,
+  });
+  const nutrition = (over: object = {}) => ({
+    status: 200,
+    body: {
+      day: '2026-11-12',
+      totals: { kcal: 473.23, proteinG: 5, carbsG: 61.5, fatG: 23, fibreG: 0 },
+      targets: { kcal: 1800, proteinG: 110, carbsG: null, fatG: null, fibreG: null },
+      meals: [meal()],
+      week: [{ day: '2026-11-12', kcal: 473, meals: 1 }, { day: '2026-11-11', kcal: 1750, meals: 3 }],
+      ...over,
+    },
+  });
+
+  it('shows the totals against the targets, each meal with its foods, and the last 7 days', async () => {
+    await open(<ClientNutrition />, ['coach'], [nutrition()]);
+    expect(await screen.findByText('LUNCH · 1:20 pm')).toBeTruthy();
+    expect(screen.getByText('Mango & Banana Fruit Clusters')).toBeTruthy();
+    expect(screen.getByText('100 g · 473 kcal')).toBeTruthy();
+    expect(screen.getByText('473 / 1800 kcal')).toBeTruthy();
+    expect(screen.getByText('5 / 110 g')).toBeTruthy();
+    expect(screen.getByLabelText('Thu 12 Nov, 473 kcal')).toBeTruthy();
+    expect(screen.getByLabelText('Wed 11 Nov, 1750 kcal')).toBeTruthy();
+  });
+
+  it('shows a photo link as a link and a stored photo as not viewable yet', async () => {
+    await open(<ClientNutrition />, ['coach'], [nutrition({ meals: [meal({ photo: { kind: 'link', url: 'https://example.test/p' } }), meal({ id: 'm2', mealType: 'dinner', photo: { kind: 'stored' } })] })]);
+    expect(await screen.findByRole('link', { name: 'Open the photo link' })).toBeTruthy();
+    expect(screen.getByText('Photo saved in the FitSphere app (not viewable here yet).')).toBeTruthy();
+  });
+
+  it('says so on an empty day, and moves to the day before', async () => {
+    const api = await open(<ClientNutrition />, ['coach'], [nutrition({ meals: [], totals: { kcal: 0, proteinG: 0, carbsG: 0, fatG: 0, fibreG: 0 } }), nutrition({ day: '2026-11-11' })]);
+    expect(await screen.findByText('Nothing logged on this day.')).toBeTruthy();
+    await fireEvent.press(screen.getByRole('button', { name: 'Previous day' }));
+    await waitFor(() => expect(api.requests.some((r) => r.url.endsWith('/nutrition?day=2026-11-11'))).toBe(true));
+  });
+
+  it('refreshes by itself every 20 seconds', async () => {
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+    try {
+      const api = await open(<ClientNutrition />, ['coach'], [nutrition(), nutrition({ meals: [meal({ id: 'm9', mealType: 'snack', items: [{ name: 'Banana', amount: null, kcal: 90, proteinG: 1, carbsG: 23, fatG: 0, estimated: true }] })] })]);
+      await screen.findByText('Mango & Banana Fruit Clusters');
+      await act(async () => {
+        jest.advanceTimersByTime(20_000);
+      });
+      expect(await screen.findByText('Banana')).toBeTruthy();
+      expect(screen.getByText('≈ 90 kcal')).toBeTruthy();
+      expect(api.requests.filter((r) => r.url.includes('/nutrition')).length).toBe(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('shows "not available" for a client that is not theirs', async () => {
+    await open(<ClientNutrition />, ['coach'], [{ status: 404, body: { error: { code: 'NOT_FOUND', message: 'x', retryable: false, requestId: 'r', details: null } } }]);
+    expect(await screen.findByText('This client is no longer available.')).toBeTruthy();
   });
 });

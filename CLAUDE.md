@@ -24,7 +24,7 @@ running and fixing happen here.
   Next: finish the phone check (runbook §6: sign up → verify link → "You're in" → "Coaching is
   off"; log in errors; forgot/change password; log out). Fix what it finds, one PR per fix.
 - **Scope changed on 2026-11-03 (v0.4, `docs/product/coach-scope.md`, C-D10 to C-D15):** gyms are
-  onboarded and approved by FitSphere with a 6-digit code emailed to `appbayaipower@gmail.com`;
+  onboarded and approved by FitSphere with a 6-digit code emailed to `pradeeppalara@gmail.com`;
   Coaches join only by a Head Coach's invitation; Head Coach powers; change log on plans;
   only the person higher up adds or removes (C-D18, 2026-11-04).
 - **CF02 — gym onboarding and FitSphere approval code — built 2026-11-11 (UI locked in `docs/design/CF02-gym-onboarding-ui.md`); phone check and migration C0003 pending.** The owner answered

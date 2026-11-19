@@ -1,5 +1,5 @@
 // Assign a diet template to clients (CF07, docs/design/CF07-nutrition-management-ui.md §2.6): each client gets
-// their own draft copy. Nothing goes live until the coach publishes it.
+// their own copy, published straight away (it replaces the client's plan and any old draft).
 import type { ClientSummary, DietTemplateDetail } from '@fitsphere-coach/shared';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -71,13 +71,13 @@ export default function WorkoutAssign() {
     } else if (result.kind === 'signedOut') {
       router.replace('/sign-in?expired=1');
     } else {
-      setProblem(failureText(result.kind, TEXTS));
+      setProblem(result.kind === 'notReady' ? DIET_TEXTS.notReady : failureText(result.kind, TEXTS));
     }
   }
 
   return (
     <PushedLayout backLabel="Template" onBack={() => (router.canGoBack() ? router.back() : router.replace('/nutrition'))} title="Assign plan">
-      <Text style={[styles.sub, { color: colors.inkMuted }]}>Each client gets their own draft to review. Nothing goes live until you publish.</Text>
+      <Text style={[styles.sub, { color: colors.inkMuted }]}>Each client gets their own copy, published straight away. It replaces any plan they have now.</Text>
       {problem ? (
         <View style={{ marginTop: 16 }}>
           <Banner kind="error">{problem}</Banner>
@@ -108,7 +108,7 @@ export default function WorkoutAssign() {
           <View style={{ gap: 8 }}>
             {clients?.map((client) => {
               const on = picked.includes(client.id);
-              const blocked = withDraft.has(client.id);
+              const blocked = false;
               return (
                 <Pressable
                   key={client.id}
@@ -125,7 +125,7 @@ export default function WorkoutAssign() {
                   <View style={{ flex: 1 }}>
                     <Text numberOfLines={1} style={[textStyles.listTitle, { color: colors.ink }]}>{client.name}</Text>
                     <Text numberOfLines={1} style={[textStyles.small, { color: colors.inkMuted }]}>
-                      {blocked ? 'Draft already exists' : withActive.has(client.id) ? 'Has an active plan' : 'No plan yet'} · {coachLabel(client.coachId, client.coachName, myId)}
+                      {withDraft.has(client.id) ? 'Has a draft (replaced)' : withActive.has(client.id) ? 'Has an active plan' : 'No plan yet'} · {coachLabel(client.coachId, client.coachName, myId)}
                     </Text>
                   </View>
                   <View style={[styles.box, on ? { backgroundColor: colors.primary, borderColor: colors.primary } : { borderColor: colors.border }]}>{on ? <Icon name="check" size={18} color={colors.onPrimary} /> : null}</View>
@@ -146,7 +146,7 @@ export default function WorkoutAssign() {
           </View>
           <View style={{ marginTop: 20 }}>
             <PrimaryButton
-              label={picked.length === 0 ? 'Pick clients' : `Create ${picked.length} ${picked.length === 1 ? 'draft' : 'drafts'}`}
+              label={picked.length === 0 ? 'Pick clients' : `Assign ${picked.length} ${picked.length === 1 ? 'plan' : 'plans'}`}
               disabled={picked.length === 0}
               loading={working}
               onPress={() => void create()}

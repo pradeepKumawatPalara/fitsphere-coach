@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **App** | FitSphere Coach (Expo, iOS + Android) |
-| **Status** | **UI approved by the owner, 2026-11-11.** Screens are in the "FitSphere Coach Screens" canvas (rows "SPEC-003 · Nutrition management", dark and light). **Built:** the coach API (migration C0005, not yet applied to Supabase), the phone screens (2.1 to 2.8) and tests. **Publish is off** until TCR-004 exists. Owner's phone check pending (`docs/operations/runbook.md` §9). |
+| **Status** | **UI approved by the owner, 2026-11-11.** Screens are in the "FitSphere Coach Screens" canvas (rows "SPEC-003 · Nutrition management", dark and light). **Built:** the coach API (migration C0005, not yet applied to Supabase), the phone screens (2.1 to 2.8) and tests. **Publish works on its own** (owner decision 2026-11-11): the plan becomes the client's active plan in the coach schema; the client's copy (`app.diet_plans`) is written only once Developer 1 has built it (TCR-004). Owner's phone check pending (`docs/operations/runbook.md` §9). |
 | **Source spec** | `spec/SPEC-003-nutrition-management.md` (business draft) and `docs/product/coach-spec.md` CDIET-001…007. Where they disagree with `docs/product/coach-scope.md` v0.4 or a C-D decision, the scope and the decisions win. |
 | **Depends on** | CF04 (clients exist), **TCR-004** (diet plans in the trainee app; Developer 1, C-D22; `docs/handoff/trainee-app/TCR-004-diet-plans.md`) |
 | **Decisions** | C-D12, C-D13, C-D15, C-D18, C-D22, C-D27, C-D28; ADR-0002 |
@@ -39,7 +39,7 @@ Visual values come from `docs/design/design-system.md`. It works like CF06 (`CF0
 - The app sends food id, grams, a label and the protein mark. The server reads the name and nutrition from the fixed food list; a request that carries nutrition values, or an unknown food, is refused.
 - Limits: 8 slots, 3 options a slot, 15 ingredients an option, 1 to 5,000 g, one decimal. At most one protein source an option on save; exactly one on publish.
 - One active plan and at most one draft per client. Publishing a draft ends the active plan in the same transaction. Every create, edit, publish, end, restore and revert is logged with who and when (C-D13).
-- Publish writes `app.diet_plans` (TCR-004) and answers "not found" while that table does not exist (ADR-0002 rule 2).
+- Publish activates the plan in the coach schema and copies it to `app.diet_plans` (TCR-004) only if that table exists; it never creates it (C-D22).
 
 ## 4. Built (2026-11-11)
 - Migration `C0005_nutrition_management.sql` (schema `coach`): `diet_templates`, `diet_plans`, `diet_plan_versions`, `diet_plan_changes`.
@@ -56,3 +56,6 @@ Still open (not blocking):
 1. **Starter food values.** The ten foods' nutrition is approximate (typical values per 100 g). Who checks it before real clients use it, or should it wait for the FitSphere food table?
 2. **How protein is fitted.** Scaling fits **calories**; protein follows the same factor, so it can end up off the client's protein target. The plan screen shows the gap and the 10% warning. Should protein get its own fitting (CQ-28)?
 3. **Allergies and preferences** (SPEC-003 §4.2) are not stored; the note fields cover it. Confirm.
+
+## Change 2026-11-11: assigning publishes straight away
+Owner decision: **Assign plan** now creates each client's plan already **published (Active)**, with no Draft step and no switch. It replaces the client's active plan, and an unpublished draft of the client is removed (the client never saw it). The template must be ready to go live, or the request is refused before anything is written. The app sends `publish: true`; the API still makes drafts when the flag is absent. This replaces the earlier answer "bulk assign = drafts". Editing a live plan still makes an unpublished new version (Publish stays for that).

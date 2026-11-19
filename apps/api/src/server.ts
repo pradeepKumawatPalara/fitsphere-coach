@@ -21,6 +21,17 @@ try {
   process.exit(1);
 }
 
+// Local testing without Gmail: LOCAL_TEST_APPROVAL_CODE skips the approval email and makes every
+// request use that fixed code. Refused in production, and the code must fit the configured length.
+const localCode = process.env.LOCAL_TEST_APPROVAL_CODE;
+if (localCode) {
+  if (process.env.NODE_ENV === 'production' || !/^[0-9]+$/.test(localCode) || localCode.length !== settings.approvalCodeLength) {
+    console.error(`LOCAL_TEST_APPROVAL_CODE must be ${settings.approvalCodeLength} digits and cannot be used in production.`);
+    process.exit(1);
+  }
+  console.warn('LOCAL TEST MODE: no approval email is sent and the approval code is fixed. Never use this for real gyms.');
+}
+
 const db = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 5, connectionTimeoutMillis: 5000 });
 // An idle connection that drops (e.g. the Supabase project pauses) must not stop the API.
 db.on('error', () => {});
@@ -33,7 +44,19 @@ const app = buildApp({
   }),
   onboarding: {
     settings,
-    mailer: createGmailMailer({ user: settings.senderEmail, appPassword: settings.smtpAppPassword }),
+    // Local test mode sends nothing: it prints the email to this console so you can see what would be sent.
+    mailer: localCode
+      ? {
+          send: async (email) => {
+            console.log(`LOCAL TEST MODE: email not sent.
+To: ${email.to}
+Subject: ${email.subject}
+${email.text}
+---`);
+          },
+        }
+      : createGmailMailer({ user: settings.senderEmail, appPassword: settings.smtpAppPassword }),
+    ...(localCode ? { fixedCode: localCode } : {}),
   },
   log: { level: process.env.LOG_LEVEL ?? 'info' },
 });

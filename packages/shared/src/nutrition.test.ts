@@ -20,7 +20,6 @@ describe('diet input', () => {
   it.each([
     ['an unknown meal type', input({ slots: [{ name: 'X', logsAs: 'brunch', options: [] }] })],
     ['four options', input({ slots: [{ name: 'X', logsAs: 'lunch', options: Array(4).fill({ name: 'A', note: '', ingredients: [] }) }] })],
-    ['two protein sources', input({ slots: [{ name: 'X', logsAs: 'lunch', options: [{ name: 'A', note: '', ingredients: [{ foodId: FOOD, grams: 10, label: null, proteinSource: true }, { foodId: FOOD, grams: 10, label: null, proteinSource: true }] }] }] })],
     ['nutrition sent by the app', input({ slots: [{ name: 'X', logsAs: 'lunch', options: [{ name: 'A', note: '', ingredients: [{ foodId: FOOD, grams: 10, label: null, proteinSource: true, kcal: 1 }] }] }] })],
     ['no slots', input({ slots: [] })],
     ['grams below 1', input({ slots: [{ name: 'X', logsAs: 'lunch', options: [{ name: 'A', note: '', ingredients: [{ foodId: FOOD, grams: 0.5, label: null, proteinSource: false }] }] }] })],
@@ -46,10 +45,11 @@ describe('totals and readiness', () => {
     expect(isOffTarget(deviation(1101, 1000))).toBe(true);
     expect(isOffTarget(deviation(900, null))).toBe(false);
   });
-  it('is ready only with an option in every slot and exactly one protein source in every option', () => {
+  it('is ready only with an option in every slot and ingredients in every option, whatever their protein source marks', () => {
     expect(dietIsReady(content(slots))).toBe(true);
     expect(dietIsReady(content([{ name: 'B', logsAs: 'breakfast', options: [] }]))).toBe(false);
-    expect(dietIsReady(content([{ name: 'B', logsAs: 'breakfast', options: [{ name: '1', note: '', ingredients: [ing(100, 2, false)] }] }]))).toBe(false);
+    expect(dietIsReady(content([{ name: 'B', logsAs: 'breakfast', options: [{ name: '1', note: '', ingredients: [ing(100, 2, false)] }] }]))).toBe(true);
+    expect(dietIsReady(content([{ name: 'B', logsAs: 'breakfast', options: [{ name: '1', note: '', ingredients: [ing(100, 2, true), ing(100, 2, true)] }] }]))).toBe(true);
     expect(dietIsReady(content([{ name: 'B', logsAs: 'breakfast', options: [{ name: '1', note: '', ingredients: [] }] }]))).toBe(false);
   });
   it('puts the protein source first and keeps the rest in order', () => {
@@ -57,12 +57,12 @@ describe('totals and readiness', () => {
   });
 });
 
-describe('the fixed food list', () => {
+describe('the starter food list (older plans)', () => {
   it('has ten foods with unique ids, and works nutrition out per 100 g', () => {
     expect(FOODS).toHaveLength(10);
     expect(new Set(FOODS.map((food) => food.id)).size).toBe(10);
     expect(nutritionFor(foodById('wheat-roti')!, 80)).toEqual({ kcal: 237.6, proteinG: 8.8, carbsG: 40, fatG: 3.2, fibreG: 2.4 });
-    expect(dietInputSchema.safeParse(input({ slots: [{ name: 'X', logsAs: 'lunch', options: [{ name: 'A', note: '', ingredients: [{ foodId: 'not-a-food', grams: 10, label: null, proteinSource: false }] }] }] })).success).toBe(false);
+    expect(dietInputSchema.safeParse(input({ slots: [{ name: 'X', logsAs: 'lunch', options: [{ name: 'A', note: '', ingredients: [{ foodId: 'not a food!', grams: 10, label: null, proteinSource: false }] }] }] })).success).toBe(false);
   });
 });
 

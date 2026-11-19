@@ -3,29 +3,63 @@
 import { z } from 'zod';
 import { idSchema } from './contracts.ts';
 
-// --- The exercise list (ten fixed exercises for now; a bigger library comes later) ---
+// --- The exercise library (app.exercises, app.exercise_details; read only, owned by the trainee app) ---
 
-export const MUSCLES = ['chest', 'back', 'shoulders', 'arms', 'legs', 'core'] as const;
-export const EQUIPMENT = ['bodyweight', 'dumbbell', 'barbell'] as const;
-export type Muscle = (typeof MUSCLES)[number];
-export type Equipment = (typeof EQUIPMENT)[number];
+/** An exercise code from the shared library, e.g. `barbell-flat-bench-press`. The server checks it exists. */
+export const exerciseCodeSchema = z.string().min(1).max(100).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
 
-export type Exercise = { id: string; name: string; muscle: Muscle; equipment: Equipment; steps: string[] };
+/** One row of the picker. Details can be missing: 100 library exercises have no `exercise_details` row. */
+export type ExerciseSummary = {
+  code: string;
+  name: string;
+  /** app.exercises.exercise_group: barbell, dumbbell, bodyweight, cardio, yoga, ... */
+  group: string;
+  /** app.exercise_details.category, or null without details. */
+  category: string | null;
+  primaryMuscle: string | null;
+  equipment: string | null;
+  /** weight_reps, reps, time, distance_time, ... */
+  logType: string;
+};
+export type ExerciseDetail = ExerciseSummary & {
+  subGroup: string | null;
+  musclesWorked: string[];
+  tags: string[];
+  steps: string[];
+  watchFor: string | null;
+  videoUrl: string | null;
+};
+export type ExerciseListResponse = { exercises: ExerciseSummary[]; total: number };
+export type ExerciseFilterOption = { value: string; count: number };
+export type ExerciseFiltersResponse = { categories: ExerciseFilterOption[]; muscles: ExerciseFilterOption[]; equipment: ExerciseFilterOption[]; groups: ExerciseFilterOption[] };
 
-export const EXERCISES: readonly Exercise[] = [
-  { id: 'bench-press', name: 'Bench press', muscle: 'chest', equipment: 'barbell', steps: ['Lie flat, feet on the floor.', 'Lower the bar to your mid chest.', 'Press it back up until your arms are straight.'] },
-  { id: 'back-squat', name: 'Back squat', muscle: 'legs', equipment: 'barbell', steps: ['Bar across your upper back, feet shoulder-width.', 'Sit down and back until your thighs are parallel.', 'Stand up, pushing through your whole foot.'] },
-  { id: 'deadlift', name: 'Deadlift', muscle: 'back', equipment: 'barbell', steps: ['Bar over mid-foot, back flat.', 'Push the floor away and stand tall.', 'Lower the bar along your legs.'] },
-  { id: 'overhead-press', name: 'Overhead press', muscle: 'shoulders', equipment: 'barbell', steps: ['Hold the bar at your collarbone.', 'Press it straight up past your face.', 'Lock out, then lower with control.'] },
-  { id: 'pull-up', name: 'Pull-up', muscle: 'back', equipment: 'bodyweight', steps: ['Hang from the bar, hands just wider than shoulders.', 'Pull your chest toward the bar.', 'Lower until your arms are straight.'] },
-  { id: 'dumbbell-row', name: 'Dumbbell row', muscle: 'back', equipment: 'dumbbell', steps: ['One hand and knee on a bench.', 'Pull the dumbbell to your hip.', 'Lower slowly, then switch sides.'] },
-  { id: 'lunge', name: 'Lunge', muscle: 'legs', equipment: 'dumbbell', steps: ['Step forward, dumbbells at your sides.', 'Lower until both knees are bent at 90 degrees.', 'Push back to standing, then switch legs.'] },
-  { id: 'push-up', name: 'Push-up', muscle: 'chest', equipment: 'bodyweight', steps: ['Hands under shoulders, body in a straight line.', 'Lower your chest to the floor.', 'Push back up.'] },
-  { id: 'plank', name: 'Plank', muscle: 'core', equipment: 'bodyweight', steps: ['Forearms on the floor, elbows under shoulders.', 'Keep your body in one straight line.', 'Hold, breathing steadily.'] },
-  { id: 'biceps-curl', name: 'Biceps curl', muscle: 'arms', equipment: 'dumbbell', steps: ['Stand tall, dumbbells at your sides.', 'Curl them up without swinging.', 'Lower slowly.'] },
-];
-export const EXERCISE_IDS = EXERCISES.map((exercise) => exercise.id);
-export const exerciseById = (id: string): Exercise | undefined => EXERCISES.find((exercise) => exercise.id === id);
+/** GET /v1/clients/{id}/exercises: a client's current plan with each exercise's library details, and what they logged. */
+export type ClientPlanExercise = {
+  exerciseId: string;
+  /** The library name, or the code if the exercise is no longer in the library. */
+  name: string;
+  sets: number;
+  repsMin: number;
+  repsMax: number;
+  weightG: number | null;
+  rpe: number | null;
+  restS: number;
+  note: string;
+  detail: ExerciseDetail | null;
+};
+export type ClientPlanDay = { name: string; weekday: number | null; rest: boolean; exercises: ClientPlanExercise[] };
+export type ClientLoggedWorkout = {
+  day: string;
+  exercises: { name: string; sets: number | null; reps: number | null; weightG: number | null; note: string | null }[];
+};
+export type ClientExercisesResponse = {
+  plan: { id: string; name: string; status: 'active' | 'draft'; weeks: number | null; days: ClientPlanDay[] } | null;
+  /** What the client logged in the FitSphere app (app.workouts), newest day first. Free-text names, not library codes. */
+  recent: ClientLoggedWorkout[];
+};
+
+export const EXERCISE_PAGE_SIZE = 30;
+export const MAX_EXERCISE_LOOKUP = 60;
 
 // --- Plan content (shared by templates and plans) ---
 
@@ -42,7 +76,7 @@ export const MAX_SETS = 6;
 
 export const planExerciseSchema = z
   .strictObject({
-    exerciseId: z.enum(EXERCISE_IDS),
+    exerciseId: exerciseCodeSchema,
     /** Exercises with the same number are a superset. */
     group: z.number().int().min(1).max(MAX_EXERCISES_PER_DAY).nullable(),
     sets: z.number().int().min(1).max(MAX_SETS),
@@ -135,6 +169,8 @@ export const assignPlanRequestSchema = z.strictObject({
   traineeIds: z.array(idSchema).min(1).max(50),
   /** The India day the plan starts, today or later; checked by the API. */
   startDate: z.iso.date(),
+  /** The app always sends true: the new plans go live straight away (an old draft of the client is removed). */
+  publish: z.boolean().optional(),
 });
 export type AssignPlanRequest = z.infer<typeof assignPlanRequestSchema>;
 
@@ -168,8 +204,10 @@ export type PlanSummary = {
 export type PlanDetail = PlanSummary & {
   content: PlanContent;
   lastChange: PlanChange | null;
-  /** Whether Publish works now (it waits for the trainee app, TCR-003, C-D22). */
+  /** Whether the plan can be published (not once it has ended). */
   canPublish: boolean;
+  /** Whether the client's FitSphere app can show a published plan yet (it waits for TCR-003, C-D22). */
+  clientSees: boolean;
 };
 export type PlanChange = {
   id: string;

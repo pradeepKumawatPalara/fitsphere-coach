@@ -1,8 +1,8 @@
 // Small pieces shared by the workout screens (docs/design/design-system.md).
 import type { PlanStatus } from '@fitsphere-coach/shared';
 import { useState, type ReactNode } from 'react';
-import { Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
-import { Icon, textStyles } from '../components/ui';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Icon, PrimaryButton, Sheet, textStyles } from '../components/ui';
 import { fonts, radius, useTheme } from '../theme';
 import { addDays, dayText, STATUS_LABELS, todayIst } from './texts';
 
@@ -38,6 +38,117 @@ export function Segmented<T extends string>({ options, value, onChange, label }:
             style={[styles.segment, selected ? { backgroundColor: colors.surfaceRaised } : null]}
           >
             <Text style={[styles.segmentText, { color: selected ? colors.ink : colors.inkMuted }]}>{option.label.toUpperCase()}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+type Option<T extends string> = { value: T; label: string };
+
+function DropdownSheet<T extends string>({ visible, onClose, title, options, selected, onPick, multi }: { visible: boolean; onClose: () => void; title: string; options: Option<T>[]; selected: T[]; onPick: (value: T) => void; multi: boolean }) {
+  const { colors } = useTheme();
+  return (
+    <Sheet visible={visible} onClose={onClose} labelledBy={title}>
+      <Text accessibilityRole="header" style={[textStyles.label, { color: colors.inkMuted, marginTop: 22 }]}>{title.toUpperCase()}</Text>
+      <ScrollView style={{ maxHeight: 360, marginTop: 8 }}>
+        {options.map((option) => {
+          const on = selected.includes(option.value);
+          return (
+            <Pressable
+              key={option.value}
+              onPress={() => onPick(option.value)}
+              accessibilityRole={multi ? 'checkbox' : 'radio'}
+              accessibilityState={multi ? { checked: on } : { selected: on }}
+              accessibilityLabel={option.label}
+              style={[styles.option, { borderBottomColor: colors.border }]}
+            >
+              <Text style={[textStyles.listTitle, { color: on ? colors.accent : colors.ink, flex: 1 }]}>{option.label}</Text>
+              {on ? <Icon name="check" size={20} color={colors.accent} /> : null}
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+      <View style={{ marginTop: 16 }}>
+        <PrimaryButton label="Done" onPress={onClose} />
+      </View>
+    </Sheet>
+  );
+}
+
+/** One choice from a list, in a dropdown. */
+export function Dropdown<T extends string>({ label, options, value, onChange }: { label: string; options: Option<T>[]; value: T; onChange: (value: T) => void }) {
+  const { colors } = useTheme();
+  const [open, setOpen] = useState(false);
+  const current = options.find((option) => option.value === value);
+  return (
+    <View style={{ gap: 6 }}>
+      <Text style={[textStyles.label, { color: colors.inkMuted }]}>{label.toUpperCase()}</Text>
+      <Pressable onPress={() => setOpen(true)} accessibilityRole="button" accessibilityLabel={`${label}: ${current?.label ?? ''}`} style={[styles.select, { backgroundColor: colors.surfaceSunken, borderColor: colors.border }]}>
+        <Text style={[textStyles.body, { color: colors.ink, flex: 1 }]}>{current?.label ?? 'Choose'}</Text>
+        <Icon name="chevron-down" color={colors.inkSubtle} />
+      </Pressable>
+      <DropdownSheet
+        visible={open}
+        onClose={() => setOpen(false)}
+        title={label}
+        options={options}
+        selected={[value]}
+        multi={false}
+        onPick={(next) => {
+          onChange(next);
+          setOpen(false);
+        }}
+      />
+    </View>
+  );
+}
+
+/** Any number of choices from a list, in a dropdown. Nothing picked means "all". */
+export function MultiDropdown<T extends string>({ label, options, values, onChange, allLabel }: { label: string; options: Option<T>[]; values: T[]; onChange: (values: T[]) => void; allLabel: string }) {
+  const { colors } = useTheme();
+  const [open, setOpen] = useState(false);
+  const names = options.filter((option) => values.includes(option.value)).map((option) => option.label);
+  const text = names.length === 0 ? allLabel : names.length <= 2 ? names.join(', ') : `${names.length} selected`;
+  return (
+    <View style={{ gap: 6 }}>
+      <Pressable onPress={() => setOpen(true)} accessibilityRole="button" accessibilityLabel={`${label}: ${text}`} style={[styles.select, { backgroundColor: colors.surfaceSunken, borderColor: colors.border }]}>
+        <Text numberOfLines={1} style={[textStyles.body, { color: names.length ? colors.ink : colors.inkMuted, flex: 1 }]}>{`${label}: ${text}`}</Text>
+        <Icon name="chevron-down" color={colors.inkSubtle} />
+      </Pressable>
+      <DropdownSheet
+        visible={open}
+        onClose={() => setOpen(false)}
+        title={label}
+        options={options}
+        selected={values}
+        multi
+        onPick={(next) => onChange(values.includes(next) ? values.filter((v) => v !== next) : [...values, next])}
+      />
+      {values.length > 0 ? (
+        <Pressable onPress={() => onChange([])} accessibilityRole="button" accessibilityLabel={`Clear ${label}`} hitSlop={8}>
+          <Text style={[textStyles.small, { color: colors.accent }]}>Clear {label.toLowerCase()}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+/** Radio buttons: a round dot, a title and a line of help for each choice. */
+export function RadioGroup<T extends string>({ label, options, value, onChange }: { label: string; options: (Option<T> & { sub?: string })[]; value: T; onChange: (value: T) => void }) {
+  const { colors } = useTheme();
+  return (
+    <View accessibilityRole="radiogroup" accessibilityLabel={label} style={{ gap: 8 }}>
+      {options.map((option) => {
+        const on = option.value === value;
+        return (
+          <Pressable key={option.value} onPress={() => onChange(option.value)} accessibilityRole="radio" accessibilityState={{ selected: on }} accessibilityLabel={option.label} style={styles.radioRow}>
+            <View style={[styles.radio, { borderColor: on ? colors.accent : colors.border }]}>{on ? <View style={[styles.radioDot, { backgroundColor: colors.accent }]} /> : null}</View>
+            <View style={{ flex: 1 }}>
+              <Text style={[textStyles.listTitle, { color: colors.ink }]}>{option.label}</Text>
+              {option.sub ? <Text style={[textStyles.small, { color: colors.inkMuted }]}>{option.sub}</Text> : null}
+            </View>
           </Pressable>
         );
       })}
@@ -158,6 +269,11 @@ export function DateStepper({ label, value, onChange }: { label: string; value: 
 }
 
 const styles = StyleSheet.create({
+  select: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1.5, borderRadius: radius.sm, paddingHorizontal: 14 },
+  option: { minHeight: 52, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1 },
+  radioRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 48 },
+  radio: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  radioDot: { width: 12, height: 12, borderRadius: 6 },
   chip: { minHeight: 44, paddingHorizontal: 12, borderWidth: 1.5, borderRadius: radius.sm, justifyContent: 'center' },
   chipText: { fontFamily: fonts.displayBold, fontSize: 14, letterSpacing: 1 },
   track: { flexDirection: 'row', borderRadius: radius.sm, padding: 3, gap: 3 },

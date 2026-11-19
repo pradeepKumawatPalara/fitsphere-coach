@@ -95,12 +95,11 @@ describe('diet templates', () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it('refuses an unknown food, two protein sources, a bad slot type, and too many options', async () => {
+  it('refuses an unknown food, a bad slot type, and too many options', async () => {
     const g = await gym();
     const bad = async (slots: object[]) => (await call('POST', '/v1/diet-templates', g.ravi.subject, template({ content: content({ slots }) }))).statusCode;
     const slot = (over: object = {}) => ({ name: 'B', logsAs: 'breakfast', options: [option()], ...over });
     expect(await bad([slot({ options: [option({ ingredients: [ing('not-a-food', 50, true)] })] })])).toBe(400);
-    expect(await bad([slot({ options: [option({ ingredients: [ing(PANEER, 50, true), ing(ROTI, 50, true)] })] })])).toBe(400);
     expect(await bad([slot({ logsAs: 'brunch' })])).toBe(400);
     expect(await bad([slot({ options: [option(), option(), option(), option()] })])).toBe(400);
     expect(await bad([slot({ options: [option({ ingredients: [ing(PANEER, 0.05, true)] })] })])).toBe(400);
@@ -160,6 +159,26 @@ describe('diet plans', () => {
     expect(again.json().error.code).toBe('PLAN_DRAFT_EXISTS');
   });
 
+  it('publishes on assign: the plan is live at once, an old draft is removed and an active plan is replaced', async () => {
+    const g = await gym();
+    const made = await makeTemplate(g.head.subject);
+    const oldDraft = (await assign(g.ravi.subject, made.id, [g.underRavi.id])).json().plans[0].id as string;
+    const send = () => call('POST', '/v1/diet-plans', g.ravi.subject, { templateId: made.id, traineeIds: [g.underRavi.id], startDate: future(), scale: false, publish: true });
+    const first = await send();
+    expect(first.statusCode).toBe(201);
+    const live = first.json().plans[0] as { id: string; status: string };
+    expect(live.status).toBe('active');
+    expect(await planRow(oldDraft)).toBeUndefined();
+    expect(await planRow(live.id)).toMatchObject({ status: 'active', live_version: 1 });
+    expect(await actions(live.id)).toEqual(['created', 'published']);
+    expect(await actions(oldDraft)).toEqual([]);
+    const second = (await send()).json().plans[0] as { id: string; status: string };
+    expect(second.status).toBe('active');
+    expect(await planRow(live.id)).toMatchObject({ status: 'ended' });
+    const plain = await assign(g.head.subject, made.id, [g.underMeera.id]);
+    expect(plain.json().plans[0].status).toBe('draft');
+  });
+
   it("scales the quantities to the client's calorie target and takes their targets; the template is not changed", async () => {
     const g = await gym();
     const made = await makeTemplate(g.head.subject);
@@ -215,13 +234,11 @@ describe('diet plans', () => {
     expect((await planRow(id)).name).toBe('Arjun cut');
   });
 
-  it('refuses to publish without exactly one protein source in every option, and with an empty slot', async () => {
+  it('refuses to publish with an empty slot or an option with no ingredients, but not for a missing protein source', async () => {
     const g = await gym();
     const id = await draft(g);
     const start = await startOf(id);
     const put = (slots: object[]) => call('PUT', `/v1/diet-plans/${id}`, g.ravi.subject, { name: 'P', startDate: start, content: content({ slots }) });
-    await put([{ name: 'B', logsAs: 'breakfast', options: [option({ ingredients: [ing(ROTI, 80)] })] }]);
-    expect((await publish(g.ravi.subject, id)).json().error.code).toBe('PLAN_NOT_READY');
     await put([{ name: 'B', logsAs: 'breakfast', options: [] }]);
     expect((await publish(g.ravi.subject, id)).statusCode).toBe(409);
     await put([{ name: 'B', logsAs: 'breakfast', options: [option({ ingredients: [] })] }]);
@@ -288,17 +305,28 @@ describe('diet plans', () => {
     expect((await call('PUT', `/v1/diet-plans/${b}`, g.ravi.subject, { name: 'x', startDate: future(), content: content() })).statusCode).toBe(403);
   });
 
-  it('Publish is off (not found) while the trainee app table does not exist', async () => {
+  it('publishes in the coach schema on its own while the trainee app table does not exist, and copies the plan once it does', async () => {
     const g = await gym();
     const id = await draft(g);
     await client.query('alter table app.diet_plans rename to diet_plans_hidden');
     try {
-      expect((await call('GET', `/v1/diet-plans/${id}`, g.ravi.subject)).json().plan.canPublish).toBe(false);
-      expect((await publish(g.ravi.subject, id)).statusCode).toBe(404);
+      const before = (await call('GET', '/v1/diet-plans/' + id, g.ravi.subject)).json().plan;
+      expect(before).toMatchObject({ canPublish: true, clientSees: false });
+      expect((await publish(g.ravi.subject, id)).statusCode).toBe(204);
+      expect(await planRow(id)).toMatchObject({ status: 'active', live_version: 1 });
+      expect(await actions(id)).toEqual(['created', 'published']);
+      // Publishing again changes nothing while there is nowhere to copy to.
+      expect((await publish(g.ravi.subject, id)).statusCode).toBe(204);
+      expect(await actions(id)).toEqual(['created', 'published']);
     } finally {
       await client.query('alter table app.diet_plans_hidden rename to diet_plans');
     }
-    expect(await planRow(id)).toMatchObject({ status: 'draft' });
+    expect(await appRow(id)).toBeUndefined();
+    // The table has appeared: publishing the same, already active plan copies it for the client.
+    expect((await call('GET', '/v1/diet-plans/' + id, g.ravi.subject)).json().plan.clientSees).toBe(true);
+    expect((await publish(g.ravi.subject, id)).statusCode).toBe(204);
+    expect(await appRow(id)).toMatchObject({ user_id: g.underRavi.id, status: 'active', version: 1 });
+    expect(await actions(id)).toEqual(['created', 'published']);
   });
 
   it('a failed publish leaves nothing behind', async () => {

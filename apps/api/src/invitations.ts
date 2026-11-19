@@ -33,7 +33,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const NOT_FOUND = () => new ApiError('NOT_FOUND');
 
 /** The viewer's gym: its Head Coach's id and the gym's name. Null if the viewer has none. */
-async function gymOf(db: Queryable, viewer: Account): Promise<{ headCoachId: string; gymName: string } | null> {
+export async function gymOf(db: Queryable, viewer: Account): Promise<{ headCoachId: string; gymName: string } | null> {
   let headCoachId: string | null = null;
   if (viewer.roles.includes('head_coach')) headCoachId = viewer.id;
   else if (viewer.roles.includes('coach')) {
@@ -49,7 +49,7 @@ async function gymOf(db: Queryable, viewer: Account): Promise<{ headCoachId: str
 }
 
 /** The people of a gym who can hold a client: the Head Coach and the gym's Coaches. */
-const GYM_PEOPLE = `
+export const GYM_PEOPLE = `
   select $1::uuid as id
   union
   select l.lower_user_id from app.links l

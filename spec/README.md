@@ -45,10 +45,19 @@ implementation instructions.
 5.  Let the client view the schedule and update activity completion.
 6.  Let authorised staff monitor schedules and progress.
 
+## Gym setup and who adds whom (updated 2026-11-12)
+
+-   There is **no approval process** for registering a gym.
+-   **Only the Gym Owner (admin)** adds the gym, and adds its Head
+    Coaches, Coaches and clients directly.
+-   Details and open questions: `docs/product/coach-scope.md` v0.5 §0
+    and §11 (Q10 to Q14); decision C-D31 (proposed).
+
 ## Roles in scope
 
 -   **Gym Owner:** Overall control of the gym's clients, plans,
-    templates and calendars.
+    templates and calendars. The only role that adds the gym, Head
+    Coaches, Coaches and clients.
 -   **Head Coach:** Manages coaches/trainers and oversees client plans
     and schedules, subject to Gym Owner permissions.
 -   **Coach / Trainer:** Manages assigned clients and their

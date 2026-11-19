@@ -29,6 +29,8 @@ const ERRORS: Record<RequestErrorCode, { status: number; message: string; retrya
   ALREADY_ADDED: { status: 409, message: "This trainee is already added.", retryable: false },
   CANNOT_INVITE_EMAIL: { status: 409, message: "This email can’t be invited here.", retryable: false },
   INVITE_LIMIT_REACHED: { status: 429, message: "You have sent the most invites allowed today. Try again tomorrow.", retryable: false },
+  CLIENT_NOT_REGISTERED: { status: 409, message: 'No FitSphere account uses this email. Ask them to sign up in the FitSphere app first.', retryable: false },
+  CLIENT_UNAVAILABLE: { status: 409, message: "This person can’t be added to your gym.", retryable: false },
   INVITE_EMAIL_FAILED: { status: 503, message: "Couldn’t send the invite. Try again.", retryable: true },
   ALREADY_HEAD_COACH: { status: 409, message: 'This email is already registered as a Head Coach.', retryable: false },
   ALREADY_COACH: { status: 409, message: 'This email is already registered as a Coach.', retryable: false },

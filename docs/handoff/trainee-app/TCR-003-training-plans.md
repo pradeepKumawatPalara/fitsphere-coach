@@ -102,7 +102,7 @@ alter table app.workouts
 Migration test (constraints, one-active index, cascade); API tests (read-only, `invalid_plan`, cross-user isolation); sync test (publish, new version, ended); UI test (card, Start pre-fill, locked); phone check with a synthetic plan.
 
 ## 10. How the coach side depends on it
-The coach server checks that `app.training_plans` exists (ADR-0002 rule 2). If absent, Publish answers "not found" and plans stay drafts. The coach side is built and tested against this exact table, copied into `apps/api/test/fixtures/proposed-app/0010_tcr003_proposed.sql`. If Developer 1 changes the SQL, tell the coach team so the copy and the publish query change too. On publish the coach server writes the row with the plan's own id (insert, or update on a new version) and sets the replaced plan's row to `ended` first, in one transaction.
+The coach server checks that `app.training_plans` exists (ADR-0002 rule 2). If it is absent, Publish still makes the plan the client's active plan **in the coach schema** (so the coach calendar works), and the client sees nothing; the copy is written when the table exists, and a plan that was already active is copied the next time it is published. The coach side is built and tested against this exact table, copied into `apps/api/test/fixtures/proposed-app/0010_tcr003_proposed.sql`. If Developer 1 changes the SQL, tell the coach team so the copy and the publish query change too. On publish the coach server writes the row with the plan's own id (insert, or update on a new version) and sets the replaced plan's row to `ended` first, in one transaction.
 
 ## 11. Rollout
 1. Owner approves CF06 UI, answers §12, sends this to Developer 1.

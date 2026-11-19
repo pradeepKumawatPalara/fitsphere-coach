@@ -1,6 +1,9 @@
 // Workout management routes (CF06). For a Coach or Head Coach; every handler also checks that the
 // template or client is theirs to see (invariant 1: hiding a button is never protection).
-//   GET  /v1/exercises                      the fixed exercise list
+//   GET  /v1/exercises                      the exercise library: ?q= ?category= ?muscle= ?equipment= ?group= ?limit= ?offset=
+//                                           or ?codes=a,b,c to get the names of a plan's exercises
+//   GET  /v1/exercises/filters              categories, muscles, equipment and groups with counts
+//   GET  /v1/exercises/{code}               one exercise with steps, watch-for and video
 //   GET  /v1/workout-templates              ?q= ?goal= ?difficulty= ?includeInactive=true
 //   POST /v1/workout-templates              create (gym-wide or personal)
 //   GET  /v1/workout-templates/{id}         one template
@@ -18,7 +21,9 @@ import {
   API_BASE_PATH,
   assignPlanRequestSchema,
   DIFFICULTIES,
-  EXERCISES,
+  EXERCISE_PAGE_SIZE,
+  exerciseCodeSchema,
+  MAX_EXERCISE_LOOKUP,
   GOALS,
   idSchema,
   PLAN_STATUSES,
@@ -32,6 +37,7 @@ import type pg from 'pg';
 import type { z } from 'zod';
 import { requireAccount } from '../access.ts';
 import { ApiError } from '../errors.ts';
+import { assertExercisesExist, exerciseDetail, exerciseFilters, lookupExercises, searchExercises } from '../exercises.ts';
 import { assignPlans, discardPlan, endPlan, getPlan, listPlans, planHistory, publishPlan, restorePlan, updatePlan } from '../plans.ts';
 import { copyTemplate, createTemplate, getTemplate, listTemplates, setTemplateActive, updateTemplate } from '../workouts.ts';
 
@@ -61,7 +67,43 @@ export function registerWorkoutRoutes(app: FastifyInstance, deps: { db: pg.Pool 
     return value;
   }
 
-  app.get(`${API_BASE_PATH}/exercises`, { config: { access: 'coach' } }, async () => ({ exercises: EXERCISES }));
+  /** A whole-number query value in a range, or undefined. */
+  function whole(query: Record<string, unknown>, name: string, min: number, max: number): number | undefined {
+    const value = query[name];
+    if (value === undefined) return undefined;
+    const number = typeof value === 'string' && /^[0-9]{1,6}$/.test(value) ? Number(value) : Number.NaN;
+    if (!(number >= min && number <= max)) throw new ApiError('VALIDATION_FAILED', [{ field: name, issue: 'out_of_range' }]);
+    return number;
+  }
+
+  app.get(`${API_BASE_PATH}/exercises`, { config: { access: 'coach' } }, async (request) => {
+    const query = request.query as Record<string, unknown>;
+    if (query.codes !== undefined) {
+      const codes = typeof query.codes === 'string' ? query.codes.split(',') : [];
+      const parsed = codes.map((code) => exerciseCodeSchema.safeParse(code));
+      if (codes.length === 0 || codes.length > MAX_EXERCISE_LOOKUP || parsed.some((result) => !result.success)) {
+        throw new ApiError('VALIDATION_FAILED', [{ field: 'codes', issue: 'invalid_format' }]);
+      }
+      return { exercises: await lookupExercises(deps.db, codes) };
+    }
+    return searchExercises(deps.db, {
+      q: option(query, 'q', null),
+      category: option(query, 'category', null),
+      muscle: option(query, 'muscle', null),
+      equipment: option(query, 'equipment', null),
+      group: option(query, 'group', null),
+      limit: whole(query, 'limit', 1, 100) ?? EXERCISE_PAGE_SIZE,
+      offset: whole(query, 'offset', 0, 100000),
+    });
+  });
+
+  app.get(`${API_BASE_PATH}/exercises/filters`, { config: { access: 'coach' } }, async () => exerciseFilters(deps.db));
+
+  app.get(`${API_BASE_PATH}/exercises/:code`, { config: { access: 'coach' } }, async (request) => {
+    const parsed = exerciseCodeSchema.safeParse((request.params as { code?: unknown }).code);
+    if (!parsed.success) throw new ApiError('NOT_FOUND');
+    return { exercise: await exerciseDetail(deps.db, parsed.data) };
+  });
 
   app.get(`${API_BASE_PATH}/workout-templates`, { config: { access: 'coach' } }, async (request) => {
     const query = request.query as Record<string, unknown>;
@@ -77,7 +119,9 @@ export function registerWorkoutRoutes(app: FastifyInstance, deps: { db: pg.Pool 
   });
 
   app.post(`${API_BASE_PATH}/workout-templates`, { config: { access: 'coach' } }, async (request, reply) => {
-    const template = await createTemplate(deps.db, requireAccount(request), body(request, templateRequestSchema));
+    const input = body(request, templateRequestSchema);
+    await assertExercisesExist(deps.db, input.content);
+    const template = await createTemplate(deps.db, requireAccount(request), input);
     request.log.info({ event: 'template_created', userId: requireAccount(request).id }, 'template created');
     return reply.status(201).send({ template });
   });
@@ -86,9 +130,11 @@ export function registerWorkoutRoutes(app: FastifyInstance, deps: { db: pg.Pool 
     template: await getTemplate(deps.db, requireAccount(request), pathId(request.params)),
   }));
 
-  app.put(`${API_BASE_PATH}/workout-templates/:id`, { config: { access: 'coach' } }, async (request) => ({
-    template: await updateTemplate(deps.db, requireAccount(request), pathId(request.params), body(request, templateRequestSchema)),
-  }));
+  app.put(`${API_BASE_PATH}/workout-templates/:id`, { config: { access: 'coach' } }, async (request) => {
+    const input = body(request, templateRequestSchema);
+    await assertExercisesExist(deps.db, input.content);
+    return { template: await updateTemplate(deps.db, requireAccount(request), pathId(request.params), input) };
+  });
 
   app.post(`${API_BASE_PATH}/workout-templates/:id/copy`, { config: { access: 'coach' } }, async (request, reply) =>
     reply.status(201).send({ template: await copyTemplate(deps.db, requireAccount(request), pathId(request.params)) }),
@@ -125,9 +171,11 @@ export function registerWorkoutRoutes(app: FastifyInstance, deps: { db: pg.Pool 
     plan: await getPlan(deps.db, requireAccount(request), pathId(request.params)),
   }));
 
-  app.put(`${API_BASE_PATH}/training-plans/:id`, { config: { access: 'coach' } }, async (request) => ({
-    plan: await updatePlan(pool(), requireAccount(request), pathId(request.params), body(request, updatePlanRequestSchema)),
-  }));
+  app.put(`${API_BASE_PATH}/training-plans/:id`, { config: { access: 'coach' } }, async (request) => {
+    const input = body(request, updatePlanRequestSchema);
+    await assertExercisesExist(deps.db, input.content);
+    return { plan: await updatePlan(pool(), requireAccount(request), pathId(request.params), input) };
+  });
 
   app.get(`${API_BASE_PATH}/training-plans/:id/history`, { config: { access: 'coach' } }, async (request) =>
     planHistory(deps.db, requireAccount(request), pathId(request.params)),

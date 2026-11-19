@@ -1,5 +1,5 @@
 // Texts and small helpers for workout management (docs/design/CF06-workout-management-ui.md).
-import { EXERCISES, MAX_DAYS, type PlanChange, type PlanContent, type PlanDay, type PlanExercise } from '@fitsphere-coach/shared';
+import { MAX_DAYS, type PlanChange, type PlanContent, type PlanDay, type PlanExercise } from '@fitsphere-coach/shared';
 import type { Failure } from './service';
 
 export const GOAL_LABELS = {
@@ -13,10 +13,8 @@ export const GOAL_LABELS = {
 export const DIFFICULTY_LABELS = { beginner: 'Beginner', intermediate: 'Intermediate', advanced: 'Advanced' } as const;
 export const STATUS_LABELS = { draft: 'Draft', active: 'Active', ended: 'Ended' } as const;
 export const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
-export const MUSCLE_LABELS = { chest: 'Chest', back: 'Back', shoulders: 'Shoulders', arms: 'Arms', legs: 'Legs', core: 'Core' } as const;
-export const EQUIPMENT_LABELS = { bodyweight: 'Bodyweight', dumbbell: 'Dumbbell', barbell: 'Barbell' } as const;
 
-export const exerciseName = (id: string): string => EXERCISES.find((exercise) => exercise.id === id)?.name ?? id;
+export { exerciseName } from './exercises';
 
 /** 120 → "2:00". */
 export const restText = (seconds: number): string => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
@@ -53,13 +51,12 @@ export function newExercise(exerciseId: string): PlanExercise {
 export function newDay(content: PlanContent): PlanDay {
   const used = new Set(content.days.map((day) => day.weekday));
   const weekday = content.scheduleMode === 'weekdays' ? ([1, 2, 3, 4, 5, 6, 7].find((value) => !used.has(value)) ?? null) : null;
-  const name = content.scheduleMode === 'weekdays' && weekday ? WEEKDAY_LABELS[weekday - 1] : `Day ${content.days.length + 1}`;
-  return { name: name ?? `Day ${content.days.length + 1}`, weekday, rest: false, exercises: [] };
+  return { name: `Day ${content.days.length + 1}`, weekday, rest: false, exercises: [] };
 }
 export const canAddDay = (content: PlanContent): boolean => content.days.length < MAX_DAYS;
 
 export function newContent(): PlanContent {
-  return { weeks: 8, scheduleMode: 'weekdays', weeklyTarget: null, dailyTarget: false, days: [{ name: 'Mon', weekday: 1, rest: false, exercises: [] }] };
+  return { weeks: 8, scheduleMode: 'weekdays', weeklyTarget: null, dailyTarget: false, days: [{ name: 'Day 1', weekday: 1, rest: false, exercises: [] }] };
 }
 
 /** Switching the schedule keeps the days and either pins them to weekdays in order or frees them. */
@@ -124,7 +121,7 @@ export const WORKOUT_TEXTS = {
   emptyTemplates: 'No templates yet',
   emptyTemplatesSub: 'Make a template once, then give a copy to each client.',
   emptyPlans: 'No plans yet',
-  emptyPlansSub: 'Open a template and tap Assign plan to make a draft for a client.',
+  emptyPlansSub: 'Open a template and tap Assign plan to give a client their plan.',
   noMatch: 'Nothing matches.',
   notFound: 'This is no longer available.',
   refused: "You can't do this.",
@@ -132,13 +129,13 @@ export const WORKOUT_TEXTS = {
   needDay: 'Add at least one day with an exercise.',
   draftExists: 'A client already has a draft plan. Open it from Plans.',
   notReady: 'Add at least one training day, with an exercise on every training day, before publishing.',
-  assignInfo: 'Each client gets their own draft to review. Nothing goes live until you publish. Later edits to the template never change these drafts.',
-  replaceInfo: (name: string) => `${name} already has an active plan. When you publish the new one, it replaces the old one.`,
+  assignInfo: 'Each client gets their own copy, published straight away. Later edits to the template never change these plans.',
+  replaceInfo: (name: string) => `${name} already has an active plan. The new plan replaces it straight away.`,
   draftBanner: (version: number, name: string) => `Draft, version ${version}. ${name} can't see this yet.`,
   unpublishedBanner: (live: number, name: string) => `You have changes that are not published. ${name} still sees version ${live}.`,
   liveBanner: (name: string) => `${name} sees this plan in their Training tab.`,
   endedBanner: 'This plan has ended. It can no longer be changed.',
-  publishWaits: 'Publishing waits for the FitSphere app update. Your draft is saved.',
+  publishWaits: 'Publishing makes this the client’s active plan. The client will see it in the FitSphere app once the app update is in.',
   publishBody: (name: string) => `${name} sees this plan in their Training tab straight away. It replaces any plan they have now. Workouts they already logged keep the plan they followed.`,
   endBody: (name: string) => `${name}'s Training tab goes back to their own logging. Their history stays.`,
   discardBody: 'Your unpublished changes will be thrown away. The client keeps the live version.',

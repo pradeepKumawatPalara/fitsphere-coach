@@ -58,8 +58,13 @@ The system should allow authorised staff to:
 
 ### 4.2 Add client
 
-The system should allow an authorised user to add a new client and
-record the agreed client information.
+The system should allow the **Gym Owner** to add a new client directly
+and record the agreed client information. No approval process is
+involved (decision C-D31, 2026-11-12, proposed).
+
+**Updated 2026-11-12:** only the Gym Owner adds clients, Coaches and
+Head Coaches. Whether Head Coaches and Coaches may also add clients is
+still to be confirmed (`docs/product/coach-scope.md` §11, Q12).
 
 Suggested information:
 
@@ -76,6 +81,28 @@ Suggested information:
 
 **To be confirmed:** Which fields are mandatory and whether membership
 information is maintained here or in a separate membership module.
+
+### 4.2a How a client is stored and what the gym sees (added 2026-11-12, proposed, C-D31)
+
+-   A **client is a FitSphere app user**. Clients are not a separate
+    table: they are the same accounts the client (trainee) app already
+    uses (`app.users`).
+-   When the Gym Owner adds a client, that user is marked as a **gym
+    member** (`is_gym_member = true`) and linked to the gym and to a
+    Coach / Head Coach. A user who is not a gym member stays a normal
+    FitSphere user and is never shown to a gym.
+-   Because it is the same account, **whatever the client plans or
+    changes in their own FitSphere calendar appears in the gym's
+    calendar** in FitSphere Coach, and what staff schedule appears in the
+    client's calendar. Staff see this only for clients of their own gym.
+-   The client's consent to share their data with the gym is still to be
+    confirmed (`docs/product/coach-scope.md` §11, Q13).
+
+**Decided 2026-11-12:** the Gym Owner can add anyone by name and email.
+A person with no FitSphere account yet is shown as **Waiting for a
+FitSphere account** and joins the gym automatically when they sign up in
+the FitSphere app with the same email. The gym never creates their login.
+Plans and the calendar start once they have joined.
 
 ### 4.3 View client profile
 
@@ -146,6 +173,8 @@ calendar schedules.
 
 -   An authorised user can add a client.
 -   The client appears in the appropriate client list.
+-   The added client is marked as a gym member, and their own calendar
+    changes appear in the gym's calendar.
 -   An authorised user can search for and open a client profile.
 -   Permitted users can update client information.
 -   The system applies the agreed access restrictions.

@@ -1,5 +1,5 @@
 // CF06 workout management: the list, the template editor, assigning, a plan and its history.
-import { fireEvent, render, screen } from '@testing-library/react-native';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useAccount } from './account/AccountProvider';
 import WorkoutAssign from './app/workout-assign';
@@ -15,6 +15,7 @@ let mockParams: Record<string, string> = {};
 jest.mock('expo-router', () => ({
   useRouter: () => mockRouter,
   useLocalSearchParams: () => mockParams,
+  useFocusEffect: (callback: () => void) => require('react').useEffect(callback, []),
 }));
 
 beforeEach(() => {
@@ -74,6 +75,7 @@ const planDetail = (over: object = {}) => ({
   content: content(),
   lastChange: { id: 'c1', action: 'edited', version: 3, actorId: ME, actorName: 'Ravi Kumar', actorRole: 'coach', summary: null, at: '2026-11-11T10:42:00.000Z' },
   canPublish: true,
+  clientSees: true,
   ...over,
 });
 
@@ -135,9 +137,30 @@ describe('Workouts home', () => {
   it('filters templates by goal and asks the server', async () => {
     const api = await open(<Workouts />, ['coach'], [{ status: 200, body: { templates: [summary()] } }, { status: 200, body: { templates: [] } }]);
     await screen.findByText('Muscle gain · Intermediate');
-    await fireEvent.press(screen.getByRole('radio', { name: 'Strength' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Goal: All goals' }));
+    await fireEvent.press(await screen.findByRole('checkbox', { name: 'Strength' }));
     expect(await screen.findByText('Nothing matches.')).toBeTruthy();
-    expect(api.requests.at(-1)?.url).toBe('http://api.test/v1/workout-templates?goal=strength');
+    await waitFor(() => expect(api.requests.at(-1)?.url).toBe('http://api.test/v1/workout-templates?goal=strength'));
+  });
+
+  it('filters by several goals at once', async () => {
+    await open(<Workouts />, ['coach'], [
+      { status: 200, body: { templates: [summary(), summary({ id: 'x', name: 'Fat loss circuit', goal: 'weight_loss' })] } },
+      { status: 200, body: { templates: [summary(), summary({ id: 'x', name: 'Fat loss circuit', goal: 'weight_loss' })] } },
+      { status: 200, body: { templates: [summary(), summary({ id: 'x', name: 'Fat loss circuit', goal: 'weight_loss' })] } },
+    ]);
+    await screen.findByText('Fat loss circuit');
+    await fireEvent.press(screen.getByRole('button', { name: 'Goal: All goals' }));
+    await fireEvent.press(await screen.findByRole('checkbox', { name: 'Muscle gain' }));
+    await fireEvent.press(await screen.findByRole('checkbox', { name: 'Weight loss' }));
+    expect(await screen.findByText('Fat loss circuit')).toBeTruthy();
+    expect(screen.getByText('Push / Pull / Legs')).toBeTruthy();
+  });
+
+  it('offers Assign on a template row', async () => {
+    await open(<Workouts />, ['coach'], [{ status: 200, body: { templates: [summary()] } }]);
+    await fireEvent.press(await screen.findByRole('button', { name: 'Assign Push / Pull / Legs' }));
+    expect(mockRouter.push).toHaveBeenCalledWith(`/workout-assign?templateId=${TEMPLATE}`);
   });
 
   it('says there are no templates yet', async () => {
@@ -186,6 +209,7 @@ describe('Template editor', () => {
     await fireEvent.press(screen.getByRole('button', { name: 'Add exercise' }));
     await fireEvent.press(await screen.findByRole('checkbox', { name: 'Plank' }));
     await fireEvent.press(screen.getByRole('button', { name: 'Add 1 exercise' }));
+    expect(api.exerciseRequests.some((url) => url.endsWith('/v1/exercises'))).toBe(true);
     await fireEvent.press(screen.getByRole('button', { name: 'Save template' }));
     await screen.findByText('Template saved.');
     const post = api.requests.at(-1);
@@ -194,6 +218,18 @@ describe('Template editor', () => {
     const sent = (post?.body as { content: { days: { exercises: { exerciseId: string; sets: number; restS: number; weightG: null }[] }[] } }).content;
     expect(sent.days[0]?.exercises).toEqual([{ exerciseId: 'plank', group: null, sets: 3, repsMin: 8, repsMax: 10, weightG: null, rpe: null, restS: 120, note: '' }]);
     expect(mockRouter.replace).toHaveBeenCalledWith(`/workout-template?id=${TEMPLATE}`);
+  });
+
+  it('searches the exercise library and filters it by category', async () => {
+    const api = await open(<WorkoutTemplate />, ['coach'], []);
+    await fireEvent.press(await screen.findByRole('button', { name: 'Add exercise' }));
+    expect(await screen.findByRole('checkbox', { name: 'Bench press' })).toBeTruthy();
+    await fireEvent.press(await screen.findByRole('radio', { name: 'Core / Abs' }));
+    await waitFor(() => expect(screen.queryByRole('checkbox', { name: 'Bench press' })).toBeNull());
+    expect(screen.getByRole('checkbox', { name: 'Plank' })).toBeTruthy();
+    expect(api.exerciseRequests.some((url) => url.includes('category=Core+%2F+Abs'))).toBe(true);
+    await fireEvent.changeText(screen.getByLabelText('Search exercises'), 'zzz');
+    expect(await screen.findByText('Nothing matches.')).toBeTruthy();
   });
 
   it('does not save a reversed rep range, and says what to fix', async () => {
@@ -255,7 +291,7 @@ describe('Assign plan', () => {
     invitations: [],
   };
 
-  it('makes a draft for each chosen client, warns about an active plan, and blocks a client with a draft', async () => {
+  it('publishes a plan for each chosen client straight away, warns about an active plan, and replaces an old draft', async () => {
     mockParams = { templateId: TEMPLATE };
     const api = await open(<WorkoutAssign />, ['coach'], [
       { status: 200, body: { template: { ...summary(), content: content() } } },
@@ -264,30 +300,30 @@ describe('Assign plan', () => {
       { status: 201, body: { plans: [planSummary()] } },
     ]);
     await screen.findByText('Push / Pull / Legs');
-    expect(screen.getByRole('checkbox', { name: 'priya@example.test', disabled: true })).toBeTruthy();
-    expect(screen.getByText(/Draft already exists/)).toBeTruthy();
+    expect(screen.getByRole('checkbox', { name: 'priya@example.test', disabled: false })).toBeTruthy();
+    expect(screen.getByText(/Has a draft \(replaced\)/)).toBeTruthy();
     await fireEvent.press(screen.getByRole('checkbox', { name: 'arjun@example.test' }));
     expect(screen.getByText(/arjun@example.test already has an active plan/)).toBeTruthy();
-    await fireEvent.press(screen.getByRole('button', { name: 'Create 1 draft' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Assign 1 plan' }));
     await screen.findByText('Push / Pull / Legs');
     const post = api.requests.at(-1);
     expect(post).toMatchObject({ method: 'POST', url: 'http://api.test/v1/training-plans' });
-    expect(post?.body).toMatchObject({ templateId: TEMPLATE, traineeIds: [ARJUN] });
+    expect(post?.body).toMatchObject({ templateId: TEMPLATE, traineeIds: [ARJUN], publish: true });
     expect((post?.body as { startDate: string }).startDate).toBe(addDays(todayIst(), 1));
     expect(mockRouter.replace).toHaveBeenCalledWith('/workouts?tab=plans');
   });
 
-  it('shows the server answer when a client already has a draft', async () => {
+  it('shows the server answer when the template cannot go live yet', async () => {
     mockParams = { templateId: TEMPLATE };
     await open(<WorkoutAssign />, ['coach'], [
       { status: 200, body: { template: { ...summary(), content: content() } } },
       { status: 200, body: clients },
       { status: 200, body: { plans: [], coaches: [] } },
-      { status: 409, body: errorBody('PLAN_DRAFT_EXISTS') },
+      { status: 409, body: errorBody('PLAN_NOT_READY') },
     ]);
     await fireEvent.press(await screen.findByRole('checkbox', { name: 'arjun@example.test' }));
-    await fireEvent.press(screen.getByRole('button', { name: 'Create 1 draft' }));
-    expect(await screen.findByText(/already has a draft plan/)).toBeTruthy();
+    await fireEvent.press(screen.getByRole('button', { name: 'Assign 1 plan' }));
+    expect(await screen.findByText(/Add at least one training day/)).toBeTruthy();
     expect(mockRouter.replace).not.toHaveBeenCalled();
   });
 
@@ -316,10 +352,16 @@ describe('Plan', () => {
     expect(screen.getByText('4 × 8–10 · 60 kg · RPE 8 · Rest 2:00')).toBeTruthy();
   });
 
-  it('hides Publish and says why while the trainee app cannot show plans yet', async () => {
-    await open(<WorkoutPlan />, ['coach'], [{ status: 200, body: { plan: planDetail({ canPublish: false }) } }]);
-    expect(await screen.findByText(/Publishing waits for the FitSphere app update/)).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Publish' })).toBeNull();
+  it('still offers Publish, and says the client sees the plan once the FitSphere app update is in', async () => {
+    await open(<WorkoutPlan />, ['coach'], [{ status: 200, body: { plan: planDetail({ clientSees: false }) } }]);
+    expect(await screen.findByText(/The client will see it in the FitSphere app once the app update is in/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Publish' })).toBeTruthy();
+  });
+
+  it('does not show that note when the client can already see published plans', async () => {
+    await open(<WorkoutPlan />, ['coach'], [{ status: 200, body: { plan: planDetail() } }]);
+    await screen.findByLabelText('Status: Draft');
+    expect(screen.queryByText(/once the app update is in/)).toBeNull();
   });
 
   it('publishes only after confirming, then reloads', async () => {

@@ -1,5 +1,6 @@
 // A plan's history (CF06, docs/design/CF06-workout-management-ui.md §2.6): who changed what and when,
 // and an earlier published version can be restored as a new draft of the working copy.
+import { useFocusTick } from '../focus';
 import type { PlanHistoryResponse } from '@fitsphere-coach/shared';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -16,6 +17,7 @@ export default function WorkoutHistory() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { deps } = useAuth();
   const router = useRouter();
+  const focused = useFocusTick();
   const { colors } = useTheme();
   const [history, setHistory] = useState<PlanHistoryResponse | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -34,7 +36,7 @@ export default function WorkoutHistory() {
     return () => {
       current = false;
     };
-  }, [deps, id, router]);
+  }, [deps, id, router, focused]);
 
   async function restore(version: number) {
     if (!id) return;

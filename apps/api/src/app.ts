@@ -6,6 +6,7 @@ import { registerAccess } from './access.ts';
 import type { Auth } from './auth.ts';
 import { errorBody, handleError } from './errors.ts';
 import type { OnboardingDeps } from './onboarding.ts';
+import { registerCalendarRoutes } from './routes/calendar.ts';
 import { registerClientRoutes } from './routes/clients.ts';
 import { registerDietRoutes } from './routes/diet.ts';
 import { registerGymRoutes } from './routes/gym.ts';
@@ -75,6 +76,7 @@ export function buildApp(deps: AppDeps) {
   registerClientRoutes(app, deps);
   registerWorkoutRoutes(app, deps);
   registerDietRoutes(app, deps);
+  registerCalendarRoutes(app, deps);
 
   return app;
 }

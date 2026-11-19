@@ -10,7 +10,7 @@ import { TEXTS } from '../auth/texts';
 import { Banner, Field, PrimaryButton, PushedLayout, SecondaryButton, Sheet, IconTile, textStyles } from '../components/ui';
 import { ContentEditor } from '../workouts/ContentEditor';
 import { copyTemplate, loadTemplate, saveTemplate, setTemplateActive, type Failure } from '../workouts/service';
-import { Chip, Segmented } from '../workouts/parts';
+import { Dropdown, RadioGroup } from '../workouts/parts';
 import { DIFFICULTY_LABELS, failureText, GOAL_LABELS, newContent, WORKOUT_TEXTS } from '../workouts/texts';
 import { fonts, useTheme } from '../theme';
 
@@ -134,34 +134,19 @@ export default function WorkoutTemplate() {
 
           <View style={{ marginTop: 18, gap: 16 }} pointerEvents={readOnly ? 'none' : 'auto'}>
             <Field label="Template name" value={name} onChangeText={setName} maxLength={80} error={nameError} editable={!readOnly} />
-            <View style={{ gap: 6 }}>
-              <Text style={[textStyles.label, { color: colors.inkMuted }]}>GOAL</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }} accessibilityRole="radiogroup" accessibilityLabel="Goal">
-                {GOALS.map((value) => (
-                  <Chip key={value} label={GOAL_LABELS[value]} selected={goal === value} onPress={() => setGoal(value)} />
-                ))}
-              </View>
-            </View>
-            <View style={{ gap: 6 }}>
-              <Text style={[textStyles.label, { color: colors.inkMuted }]}>DIFFICULTY</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }} accessibilityRole="radiogroup" accessibilityLabel="Difficulty">
-                {DIFFICULTIES.map((value) => (
-                  <Chip key={value} label={DIFFICULTY_LABELS[value]} selected={difficulty === value} onPress={() => setDifficulty(value)} />
-                ))}
-              </View>
-            </View>
+            <Dropdown label="Goal" value={goal} onChange={setGoal} options={GOALS.map((value) => ({ value, label: GOAL_LABELS[value] }))} />
+            <Dropdown label="Difficulty" value={difficulty} onChange={setDifficulty} options={DIFFICULTIES.map((value) => ({ value, label: DIFFICULTY_LABELS[value] }))} />
             <View style={{ gap: 6 }}>
               <Text style={[textStyles.label, { color: colors.inkMuted }]}>WHO CAN USE IT</Text>
-              <Segmented
+              <RadioGroup
                 label="Who can use it"
                 value={visibility}
                 onChange={setVisibility}
                 options={[
-                  { value: 'gym', label: 'Whole gym' },
-                  { value: 'personal', label: 'Only me' },
+                  { value: 'gym', label: 'Whole gym', sub: 'Every coach can use it. Only you and the Head Coach can edit it.' },
+                  { value: 'personal', label: 'Only me', sub: 'Only you can see and use it.' },
                 ]}
               />
-              <Text style={[textStyles.small, { color: colors.inkMuted }]}>Gym templates can be used by every coach. Only you and the Head Coach can edit one.</Text>
             </View>
           </View>
 

@@ -5,6 +5,7 @@ import type { Mailer, OutgoingEmail } from '../../src/mailer.ts';
 import type { Settings } from '../../src/settings.ts';
 
 export const TEST_SETTINGS: Settings = {
+  gymApprovalRequired: true,
   approvalInbox: 'approvals@example.test',
   senderEmail: 'sender@example.test',
   senderDisplayName: 'FitSphere Coach',

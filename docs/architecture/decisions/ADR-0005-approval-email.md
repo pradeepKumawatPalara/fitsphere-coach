@@ -51,9 +51,9 @@ scalability 10%, cost 10%, integration 10%.
 ### Settings
 | Setting | Where | Starting value |
 |---|---|---|
-| Sender email (`SENDER_EMAIL`) | Environment variable (ADR-0008) | `appbayaipower@gmail.com` |
+| Sender email (`SENDER_EMAIL`) | Environment variable (ADR-0008) | `unnatigaur123@gmail.com` |
 | Sender display name (`SENDER_DISPLAY_NAME`) | Environment variable | `FitSphere Coach` |
-| Approval inbox (`APPROVAL_INBOX`) | Environment variable | `appbayaipower@gmail.com` |
+| Approval inbox (`APPROVAL_INBOX`) | Environment variable | `pradeeppalara@gmail.com` |
 | Sender app password (`SMTP_APP_PASSWORD`) | `apps/api/.env` in development; the hosting secrets manager in production (ADR-0010) | Created by the owner |
 
 - The **password is never in the repo**: only in `apps/api/.env` or the host's secrets, and never
@@ -79,12 +79,12 @@ scalability 10%, cost 10%, integration 10%.
 3. Search **App passwords**, create one named **FitSphere Coach**, and copy the 16-letter password.
 4. Put it in `apps/api/.env` as `SMTP_APP_PASSWORD`. Restart the coach server.
 
-### Fallback: if an app password cannot be created for `appbayaipower@gmail.com`
+### Fallback: if an app password cannot be created for `unnatigaur123@gmail.com`
 1. Use **another Gmail account** the owner controls (a new one made only for sending is best).
 2. Turn on 2-Step Verification there and create its app password (steps above).
 3. Change two settings, no code change: **`SENDER_EMAIL`** → the new
    address; `SMTP_APP_PASSWORD` in `apps/api/.env` → the new account's app password. The display name
-   stays FitSphere Coach and the approval inbox stays `appbayaipower@gmail.com`.
+   stays FitSphere Coach and the approval inbox stays `pradeeppalara@gmail.com`.
 4. Restart the coach server and send one test request.
 
 ## Why this option wins

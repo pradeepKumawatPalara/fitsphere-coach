@@ -1,6 +1,7 @@
 // A client's plan (CF06, docs/design/CF06-workout-management-ui.md §2.5): the status first, then the
 // days. Publish, end and discard are sheets with the exact words from the design. Publish waits for the
 // FitSphere app update (TCR-003): while the server says it cannot publish, the button is hidden.
+import { useFocusTick } from '../focus';
 import type { PlanDetail } from '@fitsphere-coach/shared';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -10,6 +11,7 @@ import { TEXTS } from '../auth/texts';
 import { Banner, IconTile, PrimaryButton, PushedLayout, SecondaryButton, Sheet, textStyles, type IconName } from '../components/ui';
 import { discardPlan, endPlan, loadPlan, publishPlan, type Failure } from '../workouts/service';
 import { ActionLink, Card, SectionLabel, StatusChip } from '../workouts/parts';
+import { codesOf, useExerciseNames } from '../workouts/exercises';
 import { dayMeta, dayText, exerciseName, exerciseSummary, failureText, WEEKDAY_LABELS, WORKOUT_TEXTS, whenText } from '../workouts/texts';
 import { fonts, radius, useTheme } from '../theme';
 
@@ -19,8 +21,10 @@ export default function WorkoutPlan() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { deps } = useAuth();
   const router = useRouter();
+  const focused = useFocusTick();
   const { colors } = useTheme();
   const [plan, setPlan] = useState<PlanDetail | null>(null);
+  useExerciseNames(plan ? codesOf(plan.content) : []);
   const [problem, setProblem] = useState<string | null>(null);
   const [sheet, setSheet] = useState<SheetKind>(null);
   const [working, setWorking] = useState(false);
@@ -46,7 +50,7 @@ export default function WorkoutPlan() {
     return () => {
       current = false;
     };
-  }, [deps, id, router, tick]);
+  }, [deps, id, router, tick, focused]);
 
   async function run(action: () => Promise<{ kind: 'ok' } | { kind: Failure }>, after: 'reload' | 'list') {
     setWorking(true);
@@ -93,7 +97,7 @@ export default function WorkoutPlan() {
             {plan.status === 'active' && !unpublished ? <Banner kind="success">{WORKOUT_TEXTS.liveBanner(name)}</Banner> : null}
             {plan.status === 'ended' ? <Banner kind="info">{WORKOUT_TEXTS.endedBanner}</Banner> : null}
           </View>
-          {!plan.canPublish && plan.status !== 'ended' ? (
+          {!plan.clientSees && plan.status !== 'ended' ? (
             <View style={{ marginTop: 8 }}>
               <Banner kind="info">{WORKOUT_TEXTS.publishWaits}</Banner>
             </View>

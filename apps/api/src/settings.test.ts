@@ -41,6 +41,13 @@ describe('loadSettings', () => {
     });
   });
 
+  it('needs no email password or code secret when approval is off (C-D31), and keeps approval on by default', () => {
+    expect(loadSettings(valid).gymApprovalRequired).toBe(true);
+    const off = { ...valid, GYM_APPROVAL_REQUIRED: 'false', APPROVAL_CODE_SECRET: undefined, SMTP_APP_PASSWORD: undefined };
+    expect(loadSettings(off).gymApprovalRequired).toBe(false);
+    expect(problemsOf({ ...valid, GYM_APPROVAL_REQUIRED: 'maybe' })).toContain('GYM_APPROVAL_REQUIRED must be true or false');
+  });
+
   it('starts with the values in .env.example', () => {
     const example = parseEnv(readFileSync(new URL('../.env.example', import.meta.url), 'utf8'));
     // The example holds no secrets, so the two secrets are added here.

@@ -34,7 +34,7 @@ export default function SignUp() {
     setBusy(false);
     // 'signedIn': Supabase confirmed the account at once and sent no email (C-D9); go on as after log in.
     if (result === 'signedIn') router.replace('/');
-    else if (result === 'sent') router.replace(`/check-email?email=${encodeURIComponent(email.trim().toLowerCase())}`);
+    else if (result === 'notCreated') setProblem(TEXTS.signUpNotCreated);
     else setProblem(result === 'offline' ? TEXTS.offline : TEXTS.tryLater);
   }
 

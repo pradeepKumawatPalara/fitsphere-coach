@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { EXERCISES, planContentSchema, planIsReady, templateRequestSchema } from './workouts.ts';
+import { exerciseCodeSchema, planContentSchema, planIsReady, templateRequestSchema } from './workouts.ts';
 
 const exercise = { exerciseId: 'plank', group: null, sets: 3, repsMin: 30, repsMax: 45, weightG: null, rpe: null, restS: 60, note: '' };
 const day = (over: object = {}) => ({ name: 'Core', weekday: 1, rest: false, exercises: [exercise], ...over });
 const content = (over: object = {}) => ({ weeks: null, scheduleMode: 'weekdays', weeklyTarget: null, dailyTarget: false, days: [day()], ...over });
 
-describe('exercises', () => {
-  it('has the ten fixed exercises with unique ids', () => {
-    expect(EXERCISES).toHaveLength(10);
-    expect(new Set(EXERCISES.map((e) => e.id)).size).toBe(10);
+describe('exercise codes (the shared library)', () => {
+  it('accepts library codes and refuses anything else', () => {
+    expect(exerciseCodeSchema.safeParse('barbell-flat-bench-press').success).toBe(true);
+    expect(exerciseCodeSchema.safeParse('1-5-rep-squat').success).toBe(true);
+    for (const bad of ['', ' plank', 'a b', '-x', 'x'.repeat(101), "x'; drop table"]) expect(exerciseCodeSchema.safeParse(bad).success).toBe(false);
   });
 });
 

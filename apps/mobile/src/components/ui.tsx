@@ -17,6 +17,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fonts, radius, useTheme } from '../theme';
 import { Wordmark } from './Wordmark';
+import { lastProblem } from '../api/debug';
 
 export type IconName = ComponentProps<typeof Feather>['name'];
 /** What `ref` on a Field points at (focus the next field). */
@@ -78,24 +79,47 @@ export function AuthLayout({ onBack, children, footer }: { onBack?: () => void; 
 }
 
 /** A pushed screen: back with a muted label, then a screen title (e.g. Change password). */
-export function PushedLayout({ backLabel, onBack, title, children }: { backLabel: string; onBack: () => void; title: string; children: ReactNode }) {
+/**
+ * A pushed screen: back, title, then the content, all scrolling. With `pinned`, the back button, title and
+ * the pinned content stay on top and only `children` scroll (CF09: the day table stays in view).
+ */
+export function PushedLayout({ backLabel, onBack, title, children, pinned }: { backLabel: string; onBack: () => void; title: string; children: ReactNode; pinned?: ReactNode }) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const back = (
+    <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel={`Back to ${backLabel}`} style={styles.pushedBack}>
+      <Icon name="chevron-left" size={26} color={colors.ink} />
+      <Text style={[styles.label, { color: colors.inkMuted, fontSize: 15 }]}>{backLabel.toUpperCase()}</Text>
+    </Pressable>
+  );
+  const heading = (
+    <Text accessibilityRole="header" style={[styles.screenTitle, { color: colors.ink }]}>
+      {title.toUpperCase()}
+    </Text>
+  );
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.bg }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={[styles.pushedContent, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 28 }]}
-      >
-        <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel={`Back to ${backLabel}`} style={styles.pushedBack}>
-          <Icon name="chevron-left" size={26} color={colors.ink} />
-          <Text style={[styles.label, { color: colors.inkMuted, fontSize: 15 }]}>{backLabel.toUpperCase()}</Text>
-        </Pressable>
-        <Text accessibilityRole="header" style={[styles.screenTitle, { color: colors.ink }]}>
-          {title.toUpperCase()}
-        </Text>
-        {children}
-      </ScrollView>
+      {pinned ? (
+        <>
+          <View style={{ paddingTop: insets.top + 16, paddingHorizontal: 16, backgroundColor: colors.bg }}>
+            {back}
+            {heading}
+            {pinned}
+          </View>
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.pushedContent, { paddingTop: 4, paddingBottom: insets.bottom + 28 }]}>
+            {children}
+          </ScrollView>
+        </>
+      ) : (
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={[styles.pushedContent, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 28 }]}
+        >
+          {back}
+          {heading}
+          {children}
+        </ScrollView>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -380,7 +404,10 @@ export function Banner({ kind, children }: { kind: 'info' | 'success' | 'error';
       style={[styles.banner, { backgroundColor: look.background, borderColor: look.border }]}
     >
       <Icon name={look.icon} size={18} color={look.iconColor} />
-      <Text style={[styles.small, { color: colors.ink, flex: 1, fontSize: 14 }]}>{children}</Text>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.small, { color: colors.ink, fontSize: 14 }]}>{children}</Text>
+        {kind === 'error' && lastProblem() ? <Text style={[styles.small, { color: colors.inkMuted, fontSize: 12, marginTop: 4 }]}>{`Dev: ${lastProblem()}`}</Text> : null}
+      </View>
     </View>
   );
 }

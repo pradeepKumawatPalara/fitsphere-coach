@@ -1,4 +1,5 @@
 import { API_BASE_PATH, errorBodySchema } from '@fitsphere-coach/shared';
+import { recordProblem } from './debug';
 
 // Calls the FitSphere API (same conventions as the trainee API). The app decides from the error code, never the
 // message (same error model as the trainee API).
@@ -34,8 +35,10 @@ export async function callApi<T>(apiUrl: string | undefined, path: string, optio
     const json: unknown = await response.json().catch(() => null);
     if (response.ok) return { kind: 'ok', status: response.status, body: json as T };
     const parsed = errorBodySchema.safeParse(json);
+    recordProblem(`${options.method ?? 'GET'} ${path} -> ${response.status}${parsed.success ? ` ${parsed.data.error.code}` : ''} from ${apiUrl}`);
     return { kind: 'error', status: response.status, code: parsed.success ? parsed.data.error.code : null };
-  } catch {
+  } catch (error) {
+    recordProblem(`${options.method ?? 'GET'} ${path} could not connect to ${apiUrl} (${error instanceof Error ? error.name : 'error'})`);
     return { kind: 'offline' };
   } finally {
     clearTimeout(timer);

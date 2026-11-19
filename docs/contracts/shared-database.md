@@ -16,7 +16,9 @@ These keep the two repos from breaking each other. Changes the trainee app needs
    | `app.users` | insert (account setup, same rules as `POST /v1/me`: confirmed email, 18+ confirmation) | Coaches are FitSphere users; links point at `app.users` |
    | `app.user_roles` | insert/delete `coach`, `head_coach` | Switching on a role (REQ-ROLE-001) |
    | `app.links` | insert, end | Accepting and ending coaching links (REQ-ROLE-003/005/014/015) |
+   | `app.users.is_gym_member` | **update** (set true when a gym adds a client; false when the last gym link ends), once the column exists. Exception to C-D22 by C-D32 (proposed), 2026-11-12 | The trainee app shows gym membership; the coach app is the only writer |
    | `app.targets` | **nothing until the change request for coach-set targets is built by Developer 1** (locking coach targets in the trainee app, C-D4); then as that request defines | REQ-ROLE-006 |
+   | `app.foods`, `app.food_portions`, `app.food_measures` | **read only**: the food list for diet plans (CF07), via `GET /v1/foods`. Hidden foods and foods that need review are left out. Values per 100 g; servings come from `food_portions` and `food_measures`. Checked read-only 2026-11-13 | Reference data owned by the trainee app |
    | everything else in `app` | **read only**, and only through the access rules (invariant 1) | Trainee logs are owned by the trainee |
 
 5. **Deleting an account must still work.** Every `coach` table that points at a user uses `on delete cascade` (or is cleaned up by the trainee repo's account deletion), so a user can always be deleted (REQ-ACC-009).

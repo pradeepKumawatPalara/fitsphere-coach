@@ -2,16 +2,15 @@
 //
 // Same rules as workouts (workouts.ts, plans.ts); only what differs is noted here:
 // - The app sends foods by id and grams. The server reads each food's name and nutrition (per 100 g) from
-//   the fixed food list in the shared package (ten foods for now) and stores them with the quantity, so
+//   app.foods (read only, foods.ts; plans saved with the ten old starter ids still resolve) and stores them with the quantity, so
 //   totals cannot be made up and a plan keeps the numbers it was made with. The protein source is
 //   always stored first.
 // - Giving a template to a client can scale its quantities to the client's calorie target (`scale`).
-// - A plan is published when every slot has an option and every option has exactly one protein source.
+// - A plan is published when every slot has an option and every option has ingredients.
 //   Publish writes the trainee's row in app.diet_plans and answers "not found" while that table does
 //   not exist (TCR-004, C-D22, ADR-0002 rule 2).
 import {
   dietIsReady,
-  foodById,
   nutritionFor,
   proteinFirst,
   scaleContent,
@@ -34,6 +33,7 @@ import type pg from 'pg';
 import type { Account } from './accounts.ts';
 import { isHeadCoach, VISIBLE_UPPERS } from './clients.ts';
 import { ApiError } from './errors.ts';
+import { lookupFoods } from './foods.ts';
 import { canonical, transaction } from './plans.ts';
 import { gymOf, NOT_FOUND, roleOf } from './workouts.ts';
 
@@ -41,7 +41,8 @@ type Queryable = Pick<pg.Pool, 'query'>;
 // --- Foods ---
 
 /** Fills in each ingredient's name and nutrition from the food list. An unknown food is refused (the shared schema already does). */
-export async function resolveContent(_db: Queryable, input: DietInput): Promise<DietContent> {
+export async function resolveContent(db: Queryable, input: DietInput): Promise<DietContent> {
+  const foods = await lookupFoods(db, input.slots.flatMap((slot) => slot.options.flatMap((option) => option.ingredients.map((ingredient) => ingredient.foodId))));
   return {
     calorieTarget: input.calorieTarget,
     proteinTarget: input.proteinTarget,
@@ -53,7 +54,7 @@ export async function resolveContent(_db: Queryable, input: DietInput): Promise<
         name: option.name,
         note: option.note,
         ingredients: proteinFirst(option.ingredients).map((ingredient) => {
-          const food = foodById(ingredient.foodId);
+          const food = foods.get(ingredient.foodId);
           if (!food) throw new ApiError('VALIDATION_FAILED', [{ field: 'content.slots', issue: 'invalid_format' }]);
           return {
             foodId: ingredient.foodId,
@@ -239,7 +240,7 @@ const today = async (db: Queryable): Promise<string> =>
   ((await db.query<{ d: string }>(`select ((now() at time zone 'Asia/Kolkata')::date)::text as d`)).rows[0] as { d: string }).d;
 
 async function log(tx: Queryable, planId: string, viewer: Account, action: PlanChange['action'], version: number, summary: string | null = null) {
-  await tx.query(`insert into coach.diet_plan_changes (plan_id, action, version, actor_id, actor_role, summary) values ($1, $2, $3, $4, $5, $6)`, [
+  await tx.query(`insert into coach.diet_plan_changes (plan_id, action, version, actor_id, actor_role, summary, created_at) values ($1, $2, $3, $4, $5, $6, clock_timestamp())`, [
     planId,
     action,
     version,
@@ -301,7 +302,8 @@ export async function getDietPlan(db: Queryable, viewer: Account, id: string): P
     content: row.content,
     lastChange: (await changes(db, id, 1))[0] ?? null,
     clientTargets: { calories: target('calories'), proteinG: target('protein') },
-    canPublish: row.status !== 'ended' && (await appPlansExist(db)),
+    canPublish: row.status !== 'ended',
+    clientSees: await appPlansExist(db),
   };
 }
 
@@ -316,6 +318,8 @@ export async function assignDietPlans(db: pg.Pool, viewer: Account, request: Ass
   const template = await findDietTemplate(db, viewer, request.templateId);
   if (!template || !template.active) throw NOT_FOUND();
   if (request.startDate < (await today(db))) throw new ApiError('VALIDATION_FAILED', [{ field: 'startDate', issue: 'out_of_range' }]);
+  // Publishing on assign needs a plan that can go live; the check comes before anything is written.
+  if (request.publish && !dietIsReady(template.content)) throw new ApiError('PLAN_NOT_READY');
   const traineeIds = [...new Set(request.traineeIds)];
 
   const ids = await transaction(db, async (tx) => {
@@ -327,7 +331,11 @@ export async function assignDietPlans(db: pg.Pool, viewer: Account, request: Ass
         [viewer.id, isHeadCoach(viewer), traineeId],
       );
       if (!rowCount) throw NOT_FOUND();
-      if ((await tx.query(`select 1 from coach.diet_plans where trainee_id = $1 and status = 'draft'`, [traineeId])).rowCount) throw new ApiError('PLAN_DRAFT_EXISTS');
+      const existing = await tx.query<{ id: string }>(`select id from coach.diet_plans where trainee_id = $1 and status = 'draft'`, [traineeId]);
+      if (existing.rowCount && !request.publish) throw new ApiError('PLAN_DRAFT_EXISTS');
+      // Publishing on assign replaces an unpublished draft. The client never saw it, so it is removed
+      // (an ended plan must have been live; its change log goes with it).
+      for (const old of existing.rows) await tx.query(`delete from coach.diet_plans where id = $1 and status = 'draft'`, [old.id]);
       // With `scale`, the quantities are fitted to this client's calorie target (the template's day total
       // becomes their target) and the plan takes their targets; with no calorie target, or without
       // `scale`, the template is copied as it is.
@@ -348,6 +356,7 @@ export async function assignDietPlans(db: pg.Pool, viewer: Account, request: Ass
       await log(tx, id, viewer, 'created', 1, `From template ${template.name}`.slice(0, 200));
       created.push(id);
     }
+    if (request.publish) for (const id of created) await publishDietPlan(db, viewer, id, tx);
     return created;
   });
   const plans: DietPlanSummary[] = [];
@@ -375,13 +384,20 @@ export async function updateDietPlan(db: pg.Pool, viewer: Account, id: string, r
 }
 type UpdateDietPlanRequestParsed = Omit<UpdateDietPlanRequest, 'content'> & { content: DietInput };
 
-export async function publishDietPlan(db: pg.Pool, viewer: Account, id: string): Promise<void> {
-  if (!(await appPlansExist(db))) throw NOT_FOUND();
-  await transaction(db, async (tx) => {
+/** Runs inside the caller's transaction when one is given (assign and publish in one step), else in its own. */
+const inTransaction = <T>(db: pg.Pool, within: pg.PoolClient | undefined, work: (tx: pg.PoolClient) => Promise<T>): Promise<T> =>
+  within ? work(within) : transaction(db, work);
+
+export async function publishDietPlan(db: pg.Pool, viewer: Account, id: string, within?: pg.PoolClient): Promise<void> {
+  // Same as workout plans: publishing works in the coach schema on its own; the trainee's copy in
+  // `app.diet_plans` is written only once Developer 1 has built that table (TCR-004, C-D22).
+  await inTransaction(db, within, async (tx) => {
+    const mirror = await appPlansExist(tx);
     const plan = await requirePlanForUpdate(tx, viewer, id);
     if (plan.status === 'ended') throw new ApiError('NOT_PERMITTED');
     if (!dietIsReady(plan.content)) throw new ApiError('PLAN_NOT_READY');
-    if (plan.status === 'active' && plan.live_version === plan.version) return;
+    const live = plan.status === 'active' && plan.live_version === plan.version;
+    if (live && (!mirror || (await tx.query('select 1 from app.diet_plans where id = $1', [id])).rowCount)) return;
 
     if (plan.status === 'draft') {
       const old = await tx.query<{ id: string; version: number }>(
@@ -390,15 +406,17 @@ export async function publishDietPlan(db: pg.Pool, viewer: Account, id: string):
         [plan.trainee_id],
       );
       for (const row of old.rows) {
-        await tx.query(`update app.diet_plans set status = 'ended', ended_at = now() where id = $1`, [row.id]);
+        if (mirror) await tx.query(`update app.diet_plans set status = 'ended', ended_at = now() where id = $1`, [row.id]);
         await log(tx, row.id, viewer, 'ended', row.version, 'Replaced by a new plan');
       }
     }
-    await tx.query(`update coach.diet_plans set status = 'active', live_version = version, published_at = now(), updated_at = now() where id = $1`, [id]);
-    await tx.query(`insert into coach.diet_plan_versions (plan_id, version, name, content, published_by) values ($1, $2, $3, $4, $5)`, [
-      id, plan.version, plan.name, JSON.stringify(plan.content), viewer.id,
-    ]);
-    await tx.query(
+    if (!live) {
+      await tx.query(`update coach.diet_plans set status = 'active', live_version = version, published_at = now(), updated_at = now() where id = $1`, [id]);
+      await tx.query(`insert into coach.diet_plan_versions (plan_id, version, name, content, published_by) values ($1, $2, $3, $4, $5)`, [
+        id, plan.version, plan.name, JSON.stringify(plan.content), viewer.id,
+      ]);
+    }
+    if (mirror) await tx.query(
       `insert into app.diet_plans (id, user_id, version, name, status, start_date, calorie_target, protein_target, note, slots, set_by_user_id, set_by_role, published_at)
        values ($1, $2, $3, $4, 'active', $5, $6, $7, $8, $9, $10, $11, now())
        on conflict (id) do update set
@@ -411,7 +429,7 @@ export async function publishDietPlan(db: pg.Pool, viewer: Account, id: string):
         plan.content.note || null, JSON.stringify(plan.content.slots), viewer.id, roleOf(viewer),
       ],
     );
-    await log(tx, id, viewer, 'published', plan.version);
+    if (!live) await log(tx, id, viewer, 'published', plan.version);
   });
 }
 
